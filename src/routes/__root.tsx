@@ -43,28 +43,63 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
+  const clearLocalAndReset = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("resume-radiance.results.v1");
+      } catch {
+        /* ignore */
+      }
+    }
+    router.invalidate();
+    reset();
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+      <div className="max-w-lg w-full rounded-2xl border border-destructive/30 bg-card p-6 shadow-xl text-center space-y-4">
+        <div className="mx-auto size-12 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+          <svg className="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+        </div>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Application Error</h1>
+        <p className="text-xs text-muted-foreground">
+          An unexpected error occurred during rendering.
         </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
+
+        {error?.message && (
+          <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-left">
+            <p className="font-mono text-xs text-destructive font-semibold break-all">
+              {error.message}
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap justify-center gap-2 pt-2">
           <button
             onClick={() => {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow transition-colors hover:bg-primary/90"
           >
             Try again
           </button>
+          <button
+            onClick={clearLocalAndReset}
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-secondary px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80"
+          >
+            Clear Cache &amp; Reset
+          </button>
           <a
             href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-secondary"
           >
             Go home
           </a>

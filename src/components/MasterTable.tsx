@@ -48,15 +48,17 @@ export function MasterTable({
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = rows.filter((r) => {
-      if (tierFilter !== "all" && !r.analysis.readinessTier.startsWith(tierFilter)) return false;
+      if (!r || !r.analysis) return false;
+      const tier = r.analysis.readinessTier || "";
+      if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
       if (!q) return true;
       const a = r.analysis;
       return (
-        a.candidateName.toLowerCase().includes(q) ||
-        a.role.toLowerCase().includes(q) ||
-        r.fileName.toLowerCase().includes(q) ||
-        a.skillMatrix.matched.join(" ").toLowerCase().includes(q) ||
-        a.skillMatrix.missing.join(" ").toLowerCase().includes(q)
+        (a.candidateName || "").toLowerCase().includes(q) ||
+        (a.role || "").toLowerCase().includes(q) ||
+        (r.fileName || "").toLowerCase().includes(q) ||
+        (a.skillMatrix?.matched || []).join(" ").toLowerCase().includes(q) ||
+        (a.skillMatrix?.missing || []).join(" ").toLowerCase().includes(q)
       );
     });
 
@@ -64,15 +66,18 @@ export function MasterTable({
     const cmp: Record<SortKey, (a: MasterRow, b: MasterRow) => number> = {
       rank: (a, b) => effectiveScore(b.analysis) - effectiveScore(a.analysis),
       score: (a, b) => effectiveScore(a.analysis) - effectiveScore(b.analysis),
-      name: (a, b) => a.analysis.candidateName.localeCompare(b.analysis.candidateName),
-      file: (a, b) => a.fileName.localeCompare(b.fileName),
-      tier: (a, b) => TIER_ORDER[a.analysis.readinessTier] - TIER_ORDER[b.analysis.readinessTier],
+      name: (a, b) =>
+        (a.analysis.candidateName || "").localeCompare(b.analysis.candidateName || ""),
+      file: (a, b) => (a.fileName || "").localeCompare(b.fileName || ""),
+      tier: (a, b) =>
+        (TIER_ORDER[a.analysis.readinessTier] ?? 99) - (TIER_ORDER[b.analysis.readinessTier] ?? 99),
       jd: (a, b) => (a.analysis.jdScore ?? -1) - (b.analysis.jdScore ?? -1),
       issues: (a, b) =>
-        a.analysis.criticalIssues.filter((i) => i.severity === "critical").length -
-        b.analysis.criticalIssues.filter((i) => i.severity === "critical").length,
+        (a.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length -
+        (b.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length,
       missing: (a, b) =>
-        a.analysis.skillMatrix.missing.length - b.analysis.skillMatrix.missing.length,
+        (a.analysis.skillMatrix?.missing || []).length -
+        (b.analysis.skillMatrix?.missing || []).length,
     };
 
     list = [...list].sort((a, b) => cmp[sortKey](a, b) * dir);

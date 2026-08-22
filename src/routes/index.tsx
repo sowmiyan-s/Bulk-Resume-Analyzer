@@ -89,31 +89,40 @@ function Index() {
   // Hydrate settings and cloud database analyses on mount
   useEffect(() => {
     setSettings(loadSettings());
-    void loadAnalyses().then((saved) => {
-      if (saved.length > 0) {
-        setItems((prev) => {
-          if (prev.length > 0) return prev;
-          return saved.map((s) => ({
-            id: s.id,
-            file: {
-              name: s.file_name,
-              bytes: new Uint8Array(0),
-              kind: "pdf" as const,
-            },
-            status: "done" as Status,
-            progress: 100,
-            message: "",
-            attempt: 1,
-            rawText: "",
-            cleanText: "",
-            fixes: [] as TextFix[],
-            warnings: [] as string[],
-            analysis: s.analysis,
-            durationMs: null,
-          }));
-        });
-      }
-    });
+    void loadAnalyses()
+      .then((saved) => {
+        if (saved && Array.isArray(saved) && saved.length > 0) {
+          setItems((prev) => {
+            if (prev.length > 0) return prev;
+            return saved
+              .filter((s) => s && (s.analysis || s.candidate_name))
+              .map((s) => {
+                const normalized = normalizeAnalysis(s.analysis ?? s);
+                return {
+                  id: s.id || Math.random().toString(36).slice(2),
+                  file: {
+                    name: s.file_name || `${normalized.candidateName}.pdf`,
+                    bytes: new Uint8Array(0),
+                    kind: "pdf" as const,
+                  },
+                  status: "done" as Status,
+                  progress: 100,
+                  message: "",
+                  attempt: 1,
+                  rawText: "",
+                  cleanText: "",
+                  fixes: [] as TextFix[],
+                  warnings: [] as string[],
+                  analysis: normalized,
+                  durationMs: null,
+                };
+              });
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn("[storage] Stored analysis hydration failed:", err);
+      });
   }, []);
 
   const patch = useCallback((id: string, next: Partial<QueueItem>) => {
