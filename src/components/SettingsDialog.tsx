@@ -124,11 +124,9 @@ export function SettingsDialog({
               <Select
                 value={draft.modelId}
                 onValueChange={(val) => {
-                  const m = findModel(val);
                   setDraft({
                     ...draft,
                     modelId: val,
-                    supportsJsonMode: m.supportsJsonMode,
                   });
                 }}
               >
@@ -148,12 +146,12 @@ export function SettingsDialog({
                           <SelectItem key={m.id} value={m.id} className="text-xs">
                             <div className="flex items-center gap-2">
                               <span>{m.label}</span>
-                              {m.badge && (
+                              {m.tag && (
                                 <Badge
                                   variant="secondary"
                                   className="text-[9px] px-1.5 py-0 font-medium"
                                 >
-                                  {m.badge}
+                                  {m.tag}
                                 </Badge>
                               )}
                             </div>

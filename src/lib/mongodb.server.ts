@@ -22,7 +22,7 @@ if (typeof window === "undefined") {
     socketTimeoutMS: 45000,
   };
 
-  if (process.env.NODE_ENV === "development") {
+  if (process.env["NODE_ENV"] === "development") {
     // In development mode, use a global variable so that the value
     // is preserved across module reloads caused by HMR (Hot Module Replacement).
     if (!globalThis._mongoClientPromise) {
@@ -48,7 +48,7 @@ export async function pingMongo(): Promise<{ ok: boolean; message: string; dbNam
   try {
     const db = await getDb();
     const result = await db.command({ ping: 1 });
-    if (result.ok === 1) {
+    if (result["ok"] === 1) {
       return {
         ok: true,
         message: "MongoDB Atlas connected successfully!",
