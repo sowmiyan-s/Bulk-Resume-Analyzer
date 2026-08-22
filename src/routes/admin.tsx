@@ -205,9 +205,11 @@ function AdminPage() {
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <div className="w-full max-w-md space-y-6 rounded-3xl border border-border bg-card p-8 shadow-2xl">
           <div className="text-center space-y-2">
-            <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Shield className="size-6" />
-            </div>
+            <img
+              src="/favicon.png"
+              alt="College Logo"
+              className="mx-auto size-16 rounded-full object-contain bg-white/95 p-1 shadow-md border border-border"
+            />
             <h1 className="text-xl font-bold tracking-tight text-foreground">Admin Portal</h1>
             <p className="text-xs text-muted-foreground">
               Enter your admin passcode to access system settings and the MongoDB API vault.

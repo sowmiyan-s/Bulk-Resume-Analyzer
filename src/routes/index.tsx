@@ -559,19 +559,32 @@ function Index() {
       {/* Top Navigation */}
       <header className="sticky top-0 z-30 border-b border-border/80 bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2.5 sm:px-8">
-          <div className="flex items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border/70">
-            <TabButton
-              active={tab === "analyze"}
-              onClick={() => setTab("analyze")}
-              icon={<LayoutGrid className="size-3.5" />}
-              label="Analyze"
-            />
-            <TabButton
-              active={tab === "leaderboard"}
-              onClick={() => setTab("leaderboard")}
-              icon={<Trophy className="size-3.5" />}
-              label={`Leaderboard${stats.doneRows.length ? ` (${stats.doneRows.length})` : ""}`}
-            />
+          <div className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-2 group">
+              <img
+                src="/favicon.png"
+                alt="College Logo"
+                className="size-8 rounded-full object-contain bg-white/90 p-0.5 shadow-sm border border-border/80 group-hover:scale-105 transition-transform"
+              />
+              <span className="hidden font-bold tracking-tight text-sm sm:inline-block">
+                VSB Portal
+              </span>
+            </Link>
+
+            <div className="flex items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border/70">
+              <TabButton
+                active={tab === "analyze"}
+                onClick={() => setTab("analyze")}
+                icon={<LayoutGrid className="size-3.5" />}
+                label="Analyze"
+              />
+              <TabButton
+                active={tab === "leaderboard"}
+                onClick={() => setTab("leaderboard")}
+                icon={<Trophy className="size-3.5" />}
+                label={`Leaderboard${stats.doneRows.length ? ` (${stats.doneRows.length})` : ""}`}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
