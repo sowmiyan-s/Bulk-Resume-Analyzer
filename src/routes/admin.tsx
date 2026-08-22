@@ -208,7 +208,7 @@ function AdminPage() {
             <img
               src="/favicon.png"
               alt="College Logo"
-              className="mx-auto size-16 rounded-full object-contain bg-white/95 p-1 shadow-md border border-border"
+              className="mx-auto size-20 object-contain drop-shadow-sm"
             />
             <h1 className="text-xl font-bold tracking-tight text-foreground">Admin Portal</h1>
             <p className="text-xs text-muted-foreground">

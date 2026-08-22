@@ -564,7 +564,7 @@ function Index() {
               <img
                 src="/favicon.png"
                 alt="College Logo"
-                className="size-8 rounded-full object-contain bg-white/90 p-0.5 shadow-sm border border-border/80 group-hover:scale-105 transition-transform"
+                className="size-8 object-contain group-hover:scale-105 transition-transform"
               />
               <span className="hidden font-bold tracking-tight text-sm sm:inline-block">
                 VSB Portal
