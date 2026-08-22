@@ -4,14 +4,12 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
-const DEFAULT_URI =
-  "mongodb+srv://rdxsparrowgaming_db_user:Sowmiyan123.@cluster0.er22sa5.mongodb.net/resume_radiance?retryWrites=true&w=majority";
-
 function getMongoUri(): string {
-  if (typeof process !== "undefined" && process.env && process.env["MONGODB_URI"]) {
-    return process.env["MONGODB_URI"];
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env["MONGODB_URI"]) return process.env["MONGODB_URI"];
+    if (process.env["VITE_MONGODB_URI"]) return process.env["VITE_MONGODB_URI"];
   }
-  return DEFAULT_URI;
+  return "mongodb://localhost:27017/resume_radiance";
 }
 
 let clientPromise: Promise<MongoClient>;
