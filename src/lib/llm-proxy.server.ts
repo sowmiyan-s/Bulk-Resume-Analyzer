@@ -27,19 +27,37 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       supportsJsonMode,
     } = data;
 
-    const effectiveKey =
-      apiKey?.trim() ||
-      (typeof process !== "undefined"
-        ? (provider === "gemini"
-            ? process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"]
-            : provider === "litellm"
-              ? process.env["LITELLM_API_KEY"] || "sk-litellm"
-              : process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"]) || ""
-        : "");
+    let effectiveKey = apiKey?.trim();
+
+    if (!effectiveKey && typeof process !== "undefined") {
+      effectiveKey =
+        (provider === "gemini"
+          ? process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"]
+          : provider === "litellm"
+            ? process.env["LITELLM_API_KEY"] || "sk-litellm"
+            : process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"]) || "";
+    }
+
+    if (!effectiveKey) {
+      try {
+        const { getDb } = await import("./mongodb.server");
+        const db = await getDb();
+        const config = await db.collection("system_settings").findOne({ key: "global_config" });
+        if (config) {
+          if (provider === "nvidia" && typeof config["nvidiaApiKey"] === "string") {
+            effectiveKey = config["nvidiaApiKey"].trim();
+          } else if (provider === "gemini" && typeof config["geminiApiKey"] === "string") {
+            effectiveKey = config["geminiApiKey"].trim();
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
 
     if (!effectiveKey && provider !== "litellm" && provider !== "openai-compatible") {
       throw new Error(
-        `No API key provided for provider '${provider}'. Please add your API key in Settings.`,
+        `No API key provided for '${provider}'. Please add your API key in the AI Engine Settings or Admin Panel (/admin).`,
       );
     }
 

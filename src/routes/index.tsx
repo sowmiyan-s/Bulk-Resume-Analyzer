@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
@@ -7,6 +7,7 @@ import {
   Loader2,
   Play,
   RotateCcw,
+  Shield,
   Square,
   Trash2,
   Trophy,
@@ -578,6 +579,12 @@ function Index() {
               <span className="size-2 rounded-full bg-success" />
               <span className="font-medium text-foreground">{activeModel.label}</span>
             </div>
+            <Link
+              to="/admin"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-border/80 bg-secondary/30 px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <Shield className="size-3.5 text-primary" /> Admin
+            </Link>
             <SettingsDialog settings={settings} onSave={persist} />
           </div>
         </div>
