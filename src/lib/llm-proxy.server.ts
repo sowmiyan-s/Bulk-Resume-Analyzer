@@ -226,7 +226,7 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
           }
         } else {
           const match = parsedErr.match(/try again in ([0-9.]+)\s*(s|ms|seconds)/i);
-          if (match) {
+          if (match && match[1] && match[2]) {
             const num = parseFloat(match[1]);
             const unit = match[2].toLowerCase();
             if (unit === "ms") waitMs = Math.ceil(num) + 500;
