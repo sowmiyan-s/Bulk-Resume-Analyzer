@@ -67,15 +67,27 @@ export function SettingsDialog({
   const isCustom = model.provider === "openai-compatible";
 
   const hasVaultKey =
-    model.provider === "nvidia"
-      ? Boolean(systemInfo?.hasServerNvidiaKey)
-      : model.provider === "gemini"
-        ? Boolean(systemInfo?.hasServerGeminiKey)
-        : model.provider === "litellm";
+    model.provider === "groq"
+      ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerGroqKey)
+      : model.provider === "cerebras"
+        ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerCerebrasKey)
+        : model.provider === "openrouter"
+          ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerOpenRouterKey)
+          : model.provider === "gemini"
+            ? Boolean(systemInfo?.hasServerGeminiKey)
+            : model.provider === "nvidia"
+              ? Boolean(systemInfo?.hasServerNvidiaKey)
+              : model.provider === "ollama" || model.provider === "litellm";
 
   const handleTestKey = async () => {
-    if (model.provider !== "nvidia" && model.provider !== "gemini") {
-      toast.info(`Testing is directly supported for NVIDIA NIM and Google Gemini.`);
+    if (
+      model.provider !== "groq" &&
+      model.provider !== "cerebras" &&
+      model.provider !== "openrouter" &&
+      model.provider !== "nvidia" &&
+      model.provider !== "gemini"
+    ) {
+      toast.info(`Testing is directly supported for Groq, Cerebras, OpenRouter, Gemini, and NVIDIA NIM.`);
       return;
     }
     if (!hasVaultKey) {

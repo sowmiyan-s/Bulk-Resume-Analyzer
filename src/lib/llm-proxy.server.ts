@@ -179,17 +179,25 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       ...(isDeepSeek ? { chat_template_kwargs: { thinking: false } } : {}),
     };
 
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${effectiveKey}`,
+      Accept: "application/json",
+      ...(provider === "openrouter"
+        ? {
+            "HTTP-Referer": "https://resumeradiance.com",
+            "X-Title": "Resume Radiance",
+          }
+        : {}),
+    };
+
     let lastErr = "";
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 4; attempt++) {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${effectiveKey}`,
-          Accept: "application/json",
-        },
+        headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(35000),
+        signal: AbortSignal.timeout(45000),
       });
 
       if (res.ok) {
@@ -206,9 +214,29 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       }
       lastErr = parsedErr;
 
-      if ((res.status === 429 || res.status === 503) && attempt < 3) {
-        // Automatic exponential backoff for rate limits: 3s, 6s
-        await sleep(attempt * 3000);
+      if ((res.status === 429 || res.status === 503) && attempt < 4) {
+        // Check for Retry-After header or time hints in error text
+        const retryHeader = res.headers.get("retry-after");
+        let waitMs = attempt * 3000;
+
+        if (retryHeader) {
+          const parsedSec = parseFloat(retryHeader);
+          if (!isNaN(parsedSec) && parsedSec > 0) {
+            waitMs = Math.ceil(parsedSec * 1000) + 500;
+          }
+        } else {
+          const match = parsedErr.match(/try again in ([0-9.]+)\s*(s|ms|seconds)/i);
+          if (match) {
+            const num = parseFloat(match[1]);
+            const unit = match[2].toLowerCase();
+            if (unit === "ms") waitMs = Math.ceil(num) + 500;
+            else waitMs = Math.ceil(num * 1000) + 500;
+          }
+        }
+
+        // Cap backoff between 2s and 15s
+        waitMs = Math.max(2000, Math.min(waitMs, 15000));
+        await sleep(waitMs);
         continue;
       }
 

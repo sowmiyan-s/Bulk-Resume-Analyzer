@@ -70,12 +70,13 @@ export class LlmError extends Error {
 /* ------------------------------- prompting ------------------------------- */
 
 const SYSTEM_PROMPT =
-  "You are an objective Principal Technical Architect and Engineering Hiring Director. " +
-  "Evaluate candidates EXCLUSIVELY on technical merit, keyword presence, architecture depth, and demonstrable engineering projects. " +
-  "EVALUATION DIRECTIVES: " +
-  "1. KEYWORDS & TECH DEPTH OVER GRAMMAR: Evaluate hard technical competencies (languages, frameworks, databases, cloud, system design, APIs). Do NOT penalize candidates for minor grammatical styling or phrasing. A candidate with strong required tech skills must score high. " +
-  "2. GENDER EQUALITY & DEMOGRAPHIC NEUTRALITY: Maintain 100% unbiased equality regardless of candidate name, gender, nationality, or background. Base 100% of the evaluation on verified technical evidence. " +
-  "3. ZERO DUMMY ERRORS: Never fabricate fake flaws, imaginary typos, or artificial quotas. If clean, return []. " +
+  "You are an objective Principal Engineering Director and Senior Technical Recruiter. " +
+  "You evaluate software and tech resumes using a comprehensive, balanced industry-standard technical benchmark. " +
+  "HOLISTIC TECHNICAL BENCHMARK CRITERIA: " +
+  "1. Technical Stack Depth (35 pts max): Depth across languages, backend/frontend frameworks, databases, cloud, system architecture, and modern developer tooling. " +
+  "2. Project Architecture & Complexity (35 pts max): Non-trivial technical projects showing real problem solving, data flow, APIs, and functional execution beyond simple tutorials. " +
+  "3. Practical Experience & Verifiable Proof (20 pts max): Internships, real client work, open source, hackathons, publications, or demonstrable user adoption. " +
+  "4. ATS Modern Structure (10 pts max): Clean 1-page layout for entry-level/students, standard section headings, clear contact links, and absence of outdated photos or declaration blocks. " +
   "Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
 
 /** Compact key list. Deliberately no sample JSON — that alone saves ~400 input tokens. */
@@ -84,41 +85,38 @@ candidate_name:string (from resume, else "Unnamed candidate")
 role:string (the target role inferred or specified)
 assumed_role:string (the role evaluated against)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
-overall_score:int 0-100 (PRIMARY MATCH SCORE: High (80-98) if required technical keywords, tools, and projects are present. Low (35-60) if required technical stack is missing)
+overall_score:int 0-100 (BALANCED BENCHMARK SCORE: Sum of the 4 breakdown categories below)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
-score_breakdown:[{category:"Core Tech Keywords & Stack Match"|"Technical Architecture & Depth"|"Project Implementation & Impact"|"ATS Structure & Section Parsing",score:int,max:int,note:string}] exactly 4 rows with maxes: 30, 30, 25, 15 (sum to 100)
-recruiter_first_impression:string (<=35 words: objective technical assessment focusing on stack match)
-hr_verdict:string (<=45 words: fair, unbiased hiring recommendation based on demonstrable skills)
-strengths:[string] max 3 (concrete, verified technical skills/frameworks found in their projects)
-critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 0-4 items. ONLY real technical gaps (e.g. missing essential tools demanded by the role). Return [] if no serious issues.
+score_breakdown:[{category:"Technical Stack & Skill Depth"|"Project Architecture & Complexity"|"Practical Experience & Track Record"|"ATS Format & Section Structure",score:int,max:int,note:string}] exactly 4 rows with maxes: 35, 35, 20, 10 (sum to 100)
+recruiter_first_impression:string (<=35 words: objective technical assessment based on overall competencies)
+hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on demonstrated skills)
+strengths:[string] max 3 (top technical competencies, e.g. 'Strong backend with FastAPI & Docker', 'Multi-agent AI implementation')
+critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 0-4 items. ONLY real technical gaps or structural anti-patterns. Return [] if no serious issues.
 grammar_and_ocr_errors:[string] 0-2 items. ONLY genuine unreadable OCR glitches. Return [] if readable.
-formatting_problems:[string] 0-2 items. ONLY genuine multi-column ATS parser blockers. Return [] if clean.
-skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (CRITICAL: List all required technical keywords present in matched_skills, and all required keywords absent in missing_skills)
-bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points by adding concrete technical tools, architectures, and outcomes.
-tech_improvement_ideas:[string] max 4 (concrete technologies/tools that would elevate their technical stack depth)
+formatting_problems:[string] 0-2 items. Genuine ATS blockers (e.g. 2 pages when 1 is appropriate for student, embedded photo, obsolete declaration). Return [] if clean.
+skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (List verified technical keywords)
+bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points with technical tools, architecture, and measurable outcomes.
+tech_improvement_ideas:[string] max 4 (concrete tools/frameworks that would elevate their technical stack depth)
 project_suggestions:[string] max 2 (concrete engineering project ideas with clear architecture that solve their biggest skill gaps)
 structure:{score:int 0-100,label:string ("Excellent"|"Good"|"Needs work"|"Poor"),notes:[string] max 3}
 data_gaps:[{area,missing,impact}] max 3 (missing GitHub/live demo links, missing stack details)
 relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}`;
 
 const RULES = `Professional Evaluation & Scoring Standards:
-1. KEYWORD & TECHNICAL DEPTH FOCUS (NO GRAMMAR BIAS):
-   - Prioritize hard technical keywords (e.g., Python, React, PostgreSQL, Docker, AWS, Node.js, Go, Kubernetes, System Design).
-   - Evaluate engineering depth (state management, API design, database schemas, CI/CD, caching, scalability).
-   - Never penalize candidates for conversational grammar or ESL styling if their technical meaning is clear.
+1. BALANCED BENCHMARKING (FAIR & HOLISTIC):
+   - Evaluate the whole engineer: technical stack breadth, depth of system design, project complexity, and practical experience.
+   - Tier 1 (85-98): Exceptional candidate. Diverse modern tech stack, non-trivial full-stack or systems projects, demonstrable initiative (hackathons, packages, client work, or patents), clean 1-page structure.
+   - Tier 2 (70-84): Solid foundation. Good coursework and working prototypes, but projects may lack deep architectural complexity or production deployment.
+   - Tier 3 (35-69): Needs significant work. Missing core technical depth, superficial claims without project implementation, or severe ATS flaws.
 
-2. GENDER EQUALITY & FAIRNESS:
-   - Provide completely neutral, unbiased scoring regardless of name, perceived gender, or origin.
-   - Judge exclusively on skills, projects, and demonstrated abilities.
+2. ATS MODERNITY & DOCUMENT STATS:
+   - Check the [DOCUMENT METRICS] header: A 1-page resume is optimal for students/entry-level (score 9-10/10). A 2-page resume with photos and declaration blocks should be noted constructively (score 6-7/10).
 
-3. AUTHENTICITY — NO DUMMY CRITIQUES:
-   - If technical structure and formatting are clean, return empty arrays [] for formatting_problems and grammar_and_ocr_errors.
-   - Do NOT invent fake errors.
+3. GENDER EQUALITY & FAIRNESS:
+   - Provide completely neutral, unbiased scoring based 100% on demonstrable technical evidence and project merit.
 
-4. ACCURATE SCORING CALIBRATION:
-   - 85-98 (Strong Technical Match): Required keywords and core stack present with working projects.
-   - 70-84 (Moderate Match): Has foundational skills with minor gaps in specialized tools.
-   - 35-65 (Poor Match / Missing Skills): Missing the core required tech stack or total misalignment with the role.`;
+4. NO DUMMY CRITIQUES:
+   - Never manufacture imaginary typos or flaws. Return [] if sections are clean.`;
 
 export function buildMessages(input: {
   fileName: string;
@@ -136,16 +134,15 @@ export function buildMessages(input: {
 ${capForPrompt(jd, 2200)}
 
 EVALUATION MANDATE:
-- Match the candidate's keywords, tools, and technical stack against the REQUIRED SKILLS in this Job Description.
-- If the candidate demonstrates the required technical stack, award a HIGH score (80-98) and populate skill_matrix.matched_skills.
-- If the required technical skills are missing, award a LOW score (35-60) and list missing keywords in skill_matrix.missing_skills.
+- Benchmark the candidate's skills, project architecture, and experience against the requirements of this Job Description.
+- Calibrate score fairly across the 4 categories (Stack Depth, Project Architecture, Experience, ATS Structure).
 - Maintain strict gender equality and evaluate purely on technical merit. Set evaluation_basis to "jd-fit".`
     : `TARGET ROLE TO EVALUATE AGAINST:
 Role: ${defaultRole} (Target: ${company})
 
 EVALUATION MANDATE:
-- Match the candidate's technical keywords and project depth against this target role (${defaultRole}).
-- If their skills match, award a high score (80-98). If missing, award a low score (35-60). Maintain strict gender equality. Set evaluation_basis to "role-fit".`;
+- Benchmark the candidate's technical skills, project complexity, and engineering depth against this target role (${defaultRole}).
+- Calibrate score fairly across the 4 categories (Stack Depth, Project Architecture, Experience, ATS Structure). Set evaluation_basis to "role-fit".`;
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
@@ -154,7 +151,7 @@ EVALUATION MANDATE:
       content: `Audit this resume (file: ${input.fileName}).
 ${jdBlock}
 
-RESUME CONTENT:
+RESUME CONTENT & METRICS:
 ${capForPrompt(input.resumeText)}
 
 ${SCHEMA_SPEC}

@@ -84,6 +84,7 @@ function AdminPage() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingGroq, setTestingGroq] = useState(false);
   const [testingCerebras, setTestingCerebras] = useState(false);
+  const [testingOpenRouter, setTestingOpenRouter] = useState(false);
   const [testingNvidia, setTestingNvidia] = useState(false);
   const [testingGemini, setTestingGemini] = useState(false);
 
@@ -222,6 +223,25 @@ function AdminPage() {
       toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setTestingCerebras(false);
+    }
+  };
+
+  const handleTestOpenRouter = async () => {
+    if (!openrouterKey.trim()) {
+      toast.error("Please enter an OpenRouter API key to test.");
+      return;
+    }
+    setTestingOpenRouter(true);
+    try {
+      const res = await testApiKeyFn({
+        data: { provider: "openrouter", apiKey: openrouterKey.trim() },
+      });
+      if (res.success) toast.success(res.message);
+      else toast.error(res.message);
+    } catch (e) {
+      toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTestingOpenRouter(false);
     }
   };
 
@@ -657,6 +677,45 @@ function AdminPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Free API key from build.nvidia.com
+              </p>
+            </div>
+
+            {/* OpenRouter Free Models */}
+            <div className="space-y-2">
+              <Label htmlFor="openrouter-key" className="text-xs flex items-center justify-between">
+                <span>🔀 OpenRouter API Key (Permanent Free :free models)</span>
+                {openrouterKey && (
+                  <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
+                )}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="openrouter-key"
+                  type={showKey ? "text" : "password"}
+                  value={openrouterKey}
+                  placeholder="sk-or-v1-..."
+                  onChange={(e) => setOpenrouterKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestOpenRouter()}
+                  disabled={testingOpenRouter || !openrouterKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test OpenRouter connection"
+                >
+                  {testingOpenRouter ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Free permanent key from openrouter.ai (Access to DeepSeek R1, Llama 3.3, Qwen)
               </p>
             </div>
           </div>

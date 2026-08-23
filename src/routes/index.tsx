@@ -459,6 +459,7 @@ function Index() {
       },
     );
 
+    const activeJd = (useJd || jd.trim().length > 0) && jd.trim() ? jd.trim() : undefined;
     queueRef.current = queue;
     queue.add(
       pending.map((item) => ({
@@ -466,14 +467,14 @@ function Index() {
         run: ({ signal, attempt }) => {
           // Always read the latest copy so drawer edits are picked up.
           const latest = itemsRef.current.find((i) => i.id === item.id) ?? item;
-          return analyzeOne(latest, signal, attempt);
+          return analyzeOne(latest, signal, attempt, activeJd);
         },
         isRetryable: (error: unknown) => (error instanceof LlmError ? error.retryable : true),
       })),
     );
 
     void queue.run();
-  }, [items, settings, concurrency, cooldownSec, maxRetries, patch, analyzeOne]);
+  }, [items, settings, concurrency, cooldownSec, maxRetries, patch, analyzeOne, useJd, jd]);
 
   // Mirror items into a ref so queue tasks always read fresh text/edits.
   const itemsRef = useRef(items);

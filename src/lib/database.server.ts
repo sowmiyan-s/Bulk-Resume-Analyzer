@@ -404,17 +404,12 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
 
     if (data.provider === "groq") {
       try {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
+        const res = await fetch("https://api.groq.com/openai/v1/models", {
+          method: "GET",
           headers: {
-            "Content-Type": "application/json",
             Authorization: `Bearer ${key}`,
+            Accept: "application/json",
           },
-          body: JSON.stringify({
-            model: "llama-3.1-8b-instant",
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 5,
-          }),
           signal: AbortSignal.timeout(15000),
         });
         if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working!" };
@@ -427,24 +422,40 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
 
     if (data.provider === "cerebras") {
       try {
-        const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
-          method: "POST",
+        const res = await fetch("https://api.cerebras.ai/v1/models", {
+          method: "GET",
           headers: {
-            "Content-Type": "application/json",
             Authorization: `Bearer ${key}`,
+            Accept: "application/json",
           },
-          body: JSON.stringify({
-            model: "llama3.1-8b",
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 5,
-          }),
           signal: AbortSignal.timeout(15000),
         });
-        if (res.ok) return { success: true, message: "Cerebras API key is valid and working!" };
+        if (res.ok) {
+          return { success: true, message: "Cerebras API key is valid and working!" };
+        }
         const err = await res.text().catch(() => "");
         return { success: false, message: `Cerebras check failed (${res.status}): ${err}` };
       } catch (e) {
         return { success: false, message: `Cerebras connection failed: ${String(e)}` };
+      }
+    }
+
+    if (data.provider === "openrouter") {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/models", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "HTTP-Referer": "https://resumeradiance.com",
+            "X-Title": "Resume Radiance",
+          },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) return { success: true, message: "OpenRouter API key is valid and working!" };
+        const err = await res.text().catch(() => "");
+        return { success: false, message: `OpenRouter check failed (${res.status}): ${err}` };
+      } catch (e) {
+        return { success: false, message: `OpenRouter connection failed: ${String(e)}` };
       }
     }
 

@@ -53,17 +53,53 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
 
   const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
   let text = "";
+  let hasImage = false;
+
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    text +=
-      content.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ")
-        .replace(/\s+/g, " ") + "\n\n";
+
+    try {
+      const ops = await page.getOperatorList();
+      if (ops && ops.fnArray) {
+        const imgOps = new Set([
+          pdfjs.OPS?.paintImageXObject ?? 82,
+          pdfjs.OPS?.paintInlineImageXObject ?? 83,
+          pdfjs.OPS?.paintImageMaskXObject ?? 84,
+        ]);
+        if (ops.fnArray.some((fn) => imgOps.has(fn))) {
+          hasImage = true;
+        }
+      }
+    } catch {
+      // Non-fatal if operator list check fails
+    }
+
+    const pageLines: string[] = [];
+    let lastY: number | null = null;
+    let currentLine = "";
+
+    for (const item of content.items) {
+      if ("str" in item) {
+        const itemY = "transform" in item ? Math.round(item.transform[5]) : null;
+        if (lastY !== null && itemY !== null && Math.abs(itemY - lastY) > 6) {
+          if (currentLine.trim()) pageLines.push(currentLine.trim());
+          currentLine = item.str;
+        } else {
+          currentLine += (currentLine ? " " : "") + item.str;
+        }
+        lastY = itemY;
+      }
+    }
+    if (currentLine.trim()) pageLines.push(currentLine.trim());
+
+    text += `--- Page ${i} ---\n` + pageLines.join("\n") + "\n\n";
   }
+
   await doc.cleanup();
-  return text.trim();
+
+  const metaHeader = `[DOCUMENT METRICS: ${doc.numPages} Page(s) | Embedded Image/Photo: ${hasImage ? "Detected" : "None"}]\n\n`;
+  return (metaHeader + text).trim();
 }
 
 async function extractDocx(bytes: Uint8Array): Promise<string> {
