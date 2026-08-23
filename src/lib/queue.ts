@@ -132,9 +132,22 @@ export class RateLimitedQueue<T> {
         if (this.stopped) return;
         const message = error instanceof Error ? error.message : String(error);
         const allowed = task.isRetryable ? task.isRetryable(error) : true;
-        const hasAttemptsLeft = attempt <= this.opts.maxRetries;
-        const willRetry = allowed && hasAttemptsLeft;
-        const waitSec = willRetry ? this.opts.retryBackoffSec * Math.pow(2, attempt - 1) : 0;
+        let waitSec = willRetry ? this.opts.retryBackoffSec * Math.pow(2, attempt - 1) : 0;
+
+        // If rate limit error contains specific time instruction, honor it
+        const isRateLimit = message.includes("429") || /rate[- ]limit/i.test(message);
+        if (isRateLimit && willRetry) {
+          const match = message.match(/try again in ([0-9.]+)\s*(s|ms|seconds)/i);
+          if (match) {
+            const num = parseFloat(match[1]);
+            const unit = match[2].toLowerCase();
+            waitSec = unit === "ms" ? Math.max(2, Math.ceil(num / 1000) + 1) : Math.max(2, Math.ceil(num) + 1);
+          } else {
+            waitSec = Math.max(5, waitSec);
+          }
+          // Cooldown the dispatch gate for other parallel workers
+          this.lastDispatch = Date.now() + waitSec * 1000;
+        }
 
         this.handlers.onError?.(task.id, message, willRetry, waitSec);
         if (!willRetry) return;
