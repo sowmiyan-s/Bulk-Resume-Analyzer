@@ -12,9 +12,10 @@ function getMongoUri(): string {
   return "mongodb://localhost:27017/resume_radiance";
 }
 
-let clientPromise: Promise<MongoClient>;
+let clientInstance: MongoClient | null = null;
+let clientPromise: Promise<MongoClient> | null = null;
 
-if (typeof window === "undefined") {
+async function getConnectedClient(): Promise<MongoClient> {
   const uri = getMongoUri();
   const options = {
     maxPoolSize: 10,
@@ -22,25 +23,29 @@ if (typeof window === "undefined") {
     socketTimeoutMS: 45000,
   };
 
-  if (process.env["NODE_ENV"] === "development") {
-    // In development mode, use a global variable so that the value
-    // is preserved across module reloads caused by HMR (Hot Module Replacement).
-    if (!globalThis._mongoClientPromise) {
-      const client = new MongoClient(uri, options);
-      globalThis._mongoClientPromise = client.connect();
-    }
-    clientPromise = globalThis._mongoClientPromise;
-  } else {
-    // In production mode, it's best to not use a global variable.
+  if (!clientPromise) {
     const client = new MongoClient(uri, options);
-    clientPromise = client.connect();
+    clientInstance = client;
+    clientPromise = client
+      .connect()
+      .then((c) => {
+        return c;
+      })
+      .catch((err) => {
+        // Reset cache on error so subsequent requests can retry
+        clientPromise = null;
+        clientInstance = null;
+        throw err;
+      });
   }
-} else {
-  clientPromise = Promise.reject(new Error("MongoDB cannot be called directly from browser."));
+  return clientPromise;
 }
 
 export async function getDb(): Promise<Db> {
-  const client = await clientPromise;
+  if (typeof window !== "undefined") {
+    throw new Error("MongoDB cannot be called directly from browser.");
+  }
+  const client = await getConnectedClient();
   return client.db("resume_radiance");
 }
 
