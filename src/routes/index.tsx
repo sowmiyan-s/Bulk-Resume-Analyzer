@@ -144,6 +144,9 @@ function Index() {
     if (m?.recommendedConcurrency) {
       setConcurrency(m.recommendedConcurrency);
     }
+    if (m?.recommendedCooldownSec !== undefined) {
+      setCooldownSec(m.recommendedCooldownSec);
+    }
 
     void refreshSystemInfo();
 
@@ -193,6 +196,9 @@ function Index() {
     const m = findModel(next.modelId);
     if (m?.recommendedConcurrency) {
       setConcurrency(m.recommendedConcurrency);
+    }
+    if (m?.recommendedCooldownSec !== undefined) {
+      setCooldownSec(m.recommendedCooldownSec);
     }
   }, []);
 
