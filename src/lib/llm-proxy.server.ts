@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 
 export interface ProxyLlmPayload {
-  provider: "nvidia" | "gemini" | "litellm" | "openai-compatible";
+  provider:
+    | "groq"
+    | "cerebras"
+    | "openrouter"
+    | "ollama"
+    | "nvidia"
+    | "gemini"
+    | "litellm"
+    | "openai-compatible";
   modelId: string;
   apiKey?: string;
   targetUrl?: string;
@@ -36,7 +44,13 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
         const db = await getDb();
         const config = await db.collection("system_settings").findOne({ key: "global_config" });
         if (config) {
-          if (provider === "nvidia" && typeof config["nvidiaApiKey"] === "string" && config["nvidiaApiKey"].trim()) {
+          if (provider === "groq" && typeof config["groqApiKey"] === "string" && config["groqApiKey"].trim()) {
+            effectiveKey = config["groqApiKey"].trim();
+          } else if (provider === "cerebras" && typeof config["cerebrasApiKey"] === "string" && config["cerebrasApiKey"].trim()) {
+            effectiveKey = config["cerebrasApiKey"].trim();
+          } else if (provider === "openrouter" && typeof config["openrouterApiKey"] === "string" && config["openrouterApiKey"].trim()) {
+            effectiveKey = config["openrouterApiKey"].trim();
+          } else if (provider === "nvidia" && typeof config["nvidiaApiKey"] === "string" && config["nvidiaApiKey"].trim()) {
             effectiveKey = config["nvidiaApiKey"].trim();
           } else if (provider === "gemini" && typeof config["geminiApiKey"] === "string" && config["geminiApiKey"].trim()) {
             effectiveKey = config["geminiApiKey"].trim();
@@ -49,7 +63,13 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
 
     // 2. Fallback to process.env if available
     if (!effectiveKey && typeof process !== "undefined" && process.env) {
-      if (provider === "gemini") {
+      if (provider === "groq") {
+        effectiveKey = (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])?.trim();
+      } else if (provider === "cerebras") {
+        effectiveKey = (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])?.trim();
+      } else if (provider === "openrouter") {
+        effectiveKey = (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])?.trim();
+      } else if (provider === "gemini") {
         effectiveKey = (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim();
       } else if (provider === "litellm") {
         effectiveKey = (process.env["LITELLM_API_KEY"] || "sk-litellm")?.trim();
@@ -58,13 +78,17 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       }
     }
 
+    if (provider === "ollama") {
+      effectiveKey = "ollama-local";
+    }
+
     if (provider === "litellm" && !effectiveKey) {
       effectiveKey = "sk-litellm";
     }
 
-    if (!effectiveKey && provider !== "litellm" && provider !== "openai-compatible") {
+    if (!effectiveKey && provider !== "litellm" && provider !== "openai-compatible" && provider !== "ollama") {
       throw new Error(
-        `No API key configured in MongoDB for '${provider}'. Please log in to the Admin Panel (/admin) to configure and save your API key.`,
+        `No API key configured in MongoDB for '${provider}'. Please log in to the Admin Panel (/admin) to configure your free API key.`,
       );
     }
 
@@ -119,10 +143,18 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       }
     }
 
-    // Default: NVIDIA NIM, LiteLLM & OpenAI-compatible
+    // Default: Groq, Cerebras, OpenRouter, Ollama, NVIDIA NIM, LiteLLM & OpenAI-compatible
     let endpoint = targetUrl?.trim();
     if (!endpoint) {
-      if (provider === "litellm") {
+      if (provider === "groq") {
+        endpoint = "https://api.groq.com/openai/v1/chat/completions";
+      } else if (provider === "cerebras") {
+        endpoint = "https://api.cerebras.ai/v1/chat/completions";
+      } else if (provider === "openrouter") {
+        endpoint = "https://openrouter.ai/api/v1/chat/completions";
+      } else if (provider === "ollama") {
+        endpoint = (customBaseUrl?.trim() || "http://localhost:11434/v1").replace(/\/+$/, "") + "/chat/completions";
+      } else if (provider === "litellm") {
         const base = (customBaseUrl?.trim() || "http://localhost:4000/v1").replace(/\/+$/, "");
         endpoint = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
       } else if (provider === "openai-compatible" && customBaseUrl?.trim()) {

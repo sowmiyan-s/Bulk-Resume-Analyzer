@@ -72,13 +72,18 @@ function AdminPage() {
   const [loading, setLoading] = useState(false);
 
   // Vault state
-  const [nvidiaKey, setNvidiaKey] = useState("");
+  const [groqKey, setGroqKey] = useState("");
+  const [cerebrasKey, setCerebrasKey] = useState("");
+  const [openrouterKey, setOpenrouterKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
+  const [nvidiaKey, setNvidiaKey] = useState("");
   const [defaultRole, setDefaultRole] = useState("Software Engineer (Entry Level)");
   const [companyName, setCompanyName] = useState("the hiring company");
-  const [defaultModelId, setDefaultModelId] = useState("meta/llama-3.3-70b-instruct");
+  const [defaultModelId, setDefaultModelId] = useState("llama-3.3-70b-versatile");
   const [showKey, setShowKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [testingGroq, setTestingGroq] = useState(false);
+  const [testingCerebras, setTestingCerebras] = useState(false);
   const [testingNvidia, setTestingNvidia] = useState(false);
   const [testingGemini, setTestingGemini] = useState(false);
 
@@ -95,6 +100,9 @@ function AdminPage() {
     try {
       const res = await getAdminSettingsFn({ data: { passcode: pass } });
       if (res.success && res.settings) {
+        setGroqKey(res.settings.groqApiKey || "");
+        setCerebrasKey(res.settings.cerebrasApiKey || "");
+        setOpenrouterKey(res.settings.openrouterApiKey || "");
         setNvidiaKey(res.settings.nvidiaApiKey || "");
         setGeminiKey(res.settings.geminiApiKey || "");
         setDefaultRole(res.settings.defaultRole || "Software Engineer (Entry Level)");
@@ -156,6 +164,9 @@ function AdminPage() {
         data: {
           passcode,
           settings: {
+            groqApiKey: groqKey,
+            cerebrasApiKey: cerebrasKey,
+            openrouterApiKey: openrouterKey,
             nvidiaApiKey: nvidiaKey,
             geminiApiKey: geminiKey,
             defaultRole,
@@ -173,6 +184,44 @@ function AdminPage() {
       toast.error("Error saving settings.");
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleTestGroq = async () => {
+    if (!groqKey.trim()) {
+      toast.error("Please enter a Groq API key to test.");
+      return;
+    }
+    setTestingGroq(true);
+    try {
+      const res = await testApiKeyFn({
+        data: { provider: "groq", apiKey: groqKey.trim() },
+      });
+      if (res.success) toast.success(res.message);
+      else toast.error(res.message);
+    } catch (e) {
+      toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTestingGroq(false);
+    }
+  };
+
+  const handleTestCerebras = async () => {
+    if (!cerebrasKey.trim()) {
+      toast.error("Please enter a Cerebras API key to test.");
+      return;
+    }
+    setTestingCerebras(true);
+    try {
+      const res = await testApiKeyFn({
+        data: { provider: "cerebras", apiKey: cerebrasKey.trim() },
+      });
+      if (res.success) toast.success(res.message);
+      else toast.error(res.message);
+    } catch (e) {
+      toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTestingCerebras(false);
     }
   };
 
@@ -445,20 +494,21 @@ function AdminPage() {
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
+            {/* Groq Cloud */}
             <div className="space-y-2">
-              <Label htmlFor="nvidia-key" className="text-xs flex items-center justify-between">
-                <span>NVIDIA NIM API Key (Default)</span>
-                {nvidiaKey && (
+              <Label htmlFor="groq-key" className="text-xs flex items-center justify-between">
+                <span>⚡ Groq API Key (100% Free · 14,400/Day)</span>
+                {groqKey && (
                   <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
                 )}
               </Label>
               <div className="flex gap-2">
                 <Input
-                  id="nvidia-key"
+                  id="groq-key"
                   type={showKey ? "text" : "password"}
-                  value={nvidiaKey}
-                  placeholder="nvapi-..."
-                  onChange={(e) => setNvidiaKey(e.target.value)}
+                  value={groqKey}
+                  placeholder="gsk_..."
+                  onChange={(e) => setGroqKey(e.target.value)}
                   className="font-mono text-xs"
                 />
                 <Button
@@ -475,12 +525,12 @@ function AdminPage() {
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => void handleTestNvidia()}
-                  disabled={testingNvidia || !nvidiaKey.trim()}
+                  onClick={() => void handleTestGroq()}
+                  disabled={testingGroq || !groqKey.trim()}
                   className="shrink-0 text-xs px-2.5 h-9"
-                  title="Test NVIDIA NIM connection"
+                  title="Test Groq Cloud connection"
                 >
-                  {testingNvidia ? (
+                  {testingGroq ? (
                     <RefreshCw className="size-3.5 animate-spin" />
                   ) : (
                     <Zap className="size-3.5 mr-1 text-primary" />
@@ -489,13 +539,53 @@ function AdminPage() {
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Free API key from build.nvidia.com
+                Free permanent key from console.groq.com (30 RPM · 500+ tok/s)
               </p>
             </div>
 
+            {/* Cerebras */}
+            <div className="space-y-2">
+              <Label htmlFor="cerebras-key" className="text-xs flex items-center justify-between">
+                <span>🚀 Cerebras API Key (100% Free · 1,800 tok/s)</span>
+                {cerebrasKey && (
+                  <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
+                )}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="cerebras-key"
+                  type={showKey ? "text" : "password"}
+                  value={cerebrasKey}
+                  placeholder="csk-..."
+                  onChange={(e) => setCerebrasKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestCerebras()}
+                  disabled={testingCerebras || !cerebrasKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test Cerebras Wafer-Scale connection"
+                >
+                  {testingCerebras ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Free wafer-scale key from cloud.cerebras.ai (World's fastest)
+              </p>
+            </div>
+
+            {/* Google Gemini */}
             <div className="space-y-2">
               <Label htmlFor="gemini-key" className="text-xs flex items-center justify-between">
-                <span>Google Gemini API Key (Optional)</span>
+                <span>🌐 Google Gemini API Key (100% Free · 1,500/Day)</span>
                 {geminiKey && (
                   <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
                 )}
@@ -527,7 +617,46 @@ function AdminPage() {
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Free API key from aistudio.google.com
+                Free permanent key from aistudio.google.com (15 RPM · 1M context)
+              </p>
+            </div>
+
+            {/* NVIDIA NIM */}
+            <div className="space-y-2">
+              <Label htmlFor="nvidia-key" className="text-xs flex items-center justify-between">
+                <span>🟢 NVIDIA NIM API Key (1,000 Free Credits)</span>
+                {nvidiaKey && (
+                  <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
+                )}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="nvidia-key"
+                  type={showKey ? "text" : "password"}
+                  value={nvidiaKey}
+                  placeholder="nvapi-..."
+                  onChange={(e) => setNvidiaKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestNvidia()}
+                  disabled={testingNvidia || !nvidiaKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test NVIDIA NIM connection"
+                >
+                  {testingNvidia ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Free API key from build.nvidia.com
               </p>
             </div>
           </div>

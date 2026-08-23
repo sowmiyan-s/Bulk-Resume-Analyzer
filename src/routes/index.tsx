@@ -391,13 +391,18 @@ function Index() {
     const hasKey =
       activeM.provider === "litellm" ||
       activeM.provider === "openai-compatible" ||
+      activeM.provider === "ollama" ||
+      Boolean(settings.apiKey.trim()) ||
       Boolean(settings.proxyUrl.trim()) ||
+      (activeM.provider === "groq" && (systemInfo as Record<string, unknown>).hasServerGroqKey) ||
+      (activeM.provider === "cerebras" && (systemInfo as Record<string, unknown>).hasServerCerebrasKey) ||
+      (activeM.provider === "openrouter" && (systemInfo as Record<string, unknown>).hasServerOpenRouterKey) ||
       (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
       (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
 
     if (!hasKey) {
       toast.error(
-        `No API key configured in MongoDB for ${activeM.label}. Please open the Admin Portal (/admin) to add your API key.`,
+        `No API key configured in MongoDB for ${activeM.label}. Please open the Admin Portal (/admin) or AI Settings to add your key.`,
       );
       return;
     }
@@ -664,13 +669,18 @@ function Index() {
       const hasKey =
         activeM.provider === "litellm" ||
         activeM.provider === "openai-compatible" ||
+        activeM.provider === "ollama" ||
+        Boolean(settings.apiKey.trim()) ||
         Boolean(settings.proxyUrl.trim()) ||
+        (activeM.provider === "groq" && (systemInfo as Record<string, unknown>).hasServerGroqKey) ||
+        (activeM.provider === "cerebras" && (systemInfo as Record<string, unknown>).hasServerCerebrasKey) ||
+        (activeM.provider === "openrouter" && (systemInfo as Record<string, unknown>).hasServerOpenRouterKey) ||
         (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
         (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
 
       if (!hasKey) {
         toast.error(
-          `No API key configured in MongoDB for ${activeM.label}. Please open Admin Portal (/admin) to add your API key.`,
+          `No API key configured in MongoDB for ${activeM.label}. Please open Admin Portal (/admin) or AI Settings to add your key.`,
         );
         return;
       }

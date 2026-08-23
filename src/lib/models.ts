@@ -1,9 +1,18 @@
 /**
- * Multi-model registry for NVIDIA NIM, Google Gemini, LiteLLM Proxy, and OpenAI-compatible endpoints.
- * Curated specifically for free tier endpoints, high rate-limit models, and LiteLLM gateways.
+ * Multi-model registry for Groq, Cerebras, Google Gemini, OpenRouter (:free), Local Ollama,
+ * NVIDIA NIM, LiteLLM, and OpenAI-compatible endpoints.
+ * Curated specifically for 100% PERMANENT FREE endpoints with massive rate limits (100+ non-stop screening).
  */
 
-export type ProviderId = "nvidia" | "gemini" | "litellm" | "openai-compatible";
+export type ProviderId =
+  | "groq"
+  | "cerebras"
+  | "gemini"
+  | "openrouter"
+  | "ollama"
+  | "nvidia"
+  | "litellm"
+  | "openai-compatible";
 
 export type ModelTag =
   | "High Speed"
@@ -11,6 +20,7 @@ export type ModelTag =
   | "High Rate Limit"
   | "Deep Reasoning"
   | "Code & Tech"
+  | "Unlimited Offline"
   | "LiteLLM Proxy";
 
 export type ModelOption = {
@@ -28,216 +38,252 @@ export type ModelOption = {
   recommendedConcurrency: number;
 };
 
+export const GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions";
+export const CEREBRAS_BASE = "https://api.cerebras.ai/v1/chat/completions";
+export const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
+export const OLLAMA_DEFAULT_BASE = "http://localhost:11434/v1/chat/completions";
 export const NVIDIA_BASE = "https://integrate.api.nvidia.com/v1/chat/completions";
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 export const LITELLM_DEFAULT_BASE = "http://localhost:4000/v1";
 
 export const MODELS: ModelOption[] = [
-  // ---------- NVIDIA NIM (Free Tier & High Rate Limits) ----------
+  // =========================================================================
+  // ⚡ 1. GROQ CLOUD (100% Permanent Free Tier · 14,400 Requests/Day · 500+ tok/s)
+  // =========================================================================
   {
-    id: "meta/llama-3.3-70b-instruct",
-    label: "Llama 3.3 70B Instruct",
-    provider: "nvidia",
+    id: "llama-3.3-70b-versatile",
+    label: "Llama 3.3 70B Versatile (Groq)",
+    provider: "groq",
     tag: "Recommended",
-    note: "Free API credits · Best recruiter-quality feedback, honest evaluation & high reliability.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "meta/llama-3.1-70b-instruct",
-    label: "Llama 3.1 70B Instruct",
-    provider: "nvidia",
-    tag: "Deep Reasoning",
-    note: "Free API credits · Heavyweight 70B model with deep candidate evaluation.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "meta/llama-3.1-8b-instruct",
-    label: "Llama 3.1 8B Instruct",
-    provider: "nvidia",
-    tag: "High Rate Limit",
-    note: "Free API credits · Highest throughput & maximum RPM rate limit. Rapid batch screening.",
+    note: "100% Permanent Free · 14,400 daily requests, 30 RPM, 300+ tok/s LPU speed. Zero trials.",
     browserDirect: true,
     supportsJsonMode: true,
     recommendedConcurrency: 3,
   },
   {
-    id: "mistralai/mistral-small-24b-instruct",
-    label: "Mistral Small 24B",
-    provider: "nvidia",
+    id: "llama-3.1-8b-instant",
+    label: "Llama 3.1 8B Instant (Groq)",
+    provider: "groq",
     tag: "High Rate Limit",
-    note: "Free API credits · Fast, high rate limits, sharp technical critique & structured JSON.",
+    note: "100% Permanent Free · 600+ tok/s. Instant batch screening for 100+ resumes in minutes.",
     browserDirect: true,
     supportsJsonMode: true,
-    recommendedConcurrency: 2,
+    recommendedConcurrency: 4,
   },
   {
-    id: "mistralai/mixtral-8x7b-instruct-v0.1",
-    label: "Mixtral 8x7B Instruct",
-    provider: "nvidia",
+    id: "mixtral-8x7b-32768",
+    label: "Mixtral 8x7B (Groq)",
+    provider: "groq",
     tag: "High Speed",
-    note: "Free API credits · High-speed Mixture-of-Experts model for fast batch processing.",
+    note: "100% Permanent Free · 400+ tok/s high-throughput Mixture-of-Experts architecture.",
     browserDirect: true,
     supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-  {
-    id: "mistralai/mixtral-8x22b-instruct-v0.1",
-    label: "Mixtral 8x22B Instruct",
-    provider: "nvidia",
-    tag: "Deep Reasoning",
-    note: "Free API credits · Large-scale MoE model for intricate skill analysis.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "qwen/qwen2.5-coder-32b-instruct",
-    label: "Qwen 2.5 Coder 32B",
-    provider: "nvidia",
-    tag: "Code & Tech",
-    note: "Free API credits · Specialized for software engineering, architectures & technical stacks.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-  {
-    id: "qwen/qwen2.5-72b-instruct",
-    label: "Qwen 2.5 72B Instruct",
-    provider: "nvidia",
-    tag: "Deep Reasoning",
-    note: "Free API credits · High-intelligence 72B model for executive and senior shortlisting.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "deepseek-ai/deepseek-r1-distill-qwen-32b",
-    label: "DeepSeek R1 Distill 32B",
-    provider: "nvidia",
-    tag: "Deep Reasoning",
-    note: "Free API credits · In-depth chain-of-thought reasoning for top candidate assessment.",
-    browserDirect: true,
-    supportsJsonMode: false,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "deepseek-ai/deepseek-v4-flash-0731",
-    label: "DeepSeek V4 Flash",
-    provider: "nvidia",
-    tag: "High Speed",
-    note: "Free API credits · Ultra-fast direct inference with zero thinking latency.",
-    browserDirect: true,
-    supportsJsonMode: false,
     recommendedConcurrency: 3,
   },
   {
-    id: "nvidia/llama-3.1-nemotron-70b-instruct",
-    label: "Nemotron 70B Instruct",
-    provider: "nvidia",
+    id: "gemma2-9b-it",
+    label: "Gemma 2 9B IT (Groq)",
+    provider: "groq",
+    tag: "High Speed",
+    note: "100% Permanent Free · Google Gemma 2 accelerated with extreme Groq LPU throughput.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 3,
+  },
+
+  // =========================================================================
+  // 🚀 2. CEREBRAS WAFER-SCALE (100% Permanent Free Tier · 1,800 tok/s)
+  // =========================================================================
+  {
+    id: "llama3.1-8b",
+    label: "Llama 3.1 8B (Cerebras)",
+    provider: "cerebras",
+    tag: "High Rate Limit",
+    note: "100% Permanent Free · 1,800 tokens/sec (World's fastest). Non-stop instant batch evaluation.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 4,
+  },
+  {
+    id: "llama-3.3-70b",
+    label: "Llama 3.3 70B (Cerebras)",
+    provider: "cerebras",
     tag: "Recommended",
-    note: "Free API credits · NVIDIA-optimized 70B model with high precision instruction following.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
-  },
-  {
-    id: "google/gemma-2-27b-it",
-    label: "Gemma 2 27B IT",
-    provider: "nvidia",
-    tag: "High Speed",
-    note: "Free API credits · Google Gemma architecture hosted with TensorRT speed on NVIDIA NIM.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-  {
-    id: "google/gemma-2-9b-it",
-    label: "Gemma 2 9B IT",
-    provider: "nvidia",
-    tag: "High Rate Limit",
-    note: "Free API credits · Lightweight, ultra-fast model with generous rate limits.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 3,
-  },
-  {
-    id: "microsoft/phi-3.5-mini-instruct",
-    label: "Phi-3.5 Mini Instruct (3.8B)",
-    provider: "nvidia",
-    tag: "High Rate Limit",
-    note: "Free API credits · Highly efficient small language model with instant inference.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 3,
-  },
-  {
-    id: "microsoft/phi-3.5-moe-instruct",
-    label: "Phi-3.5 MoE Instruct",
-    provider: "nvidia",
-    tag: "High Speed",
-    note: "Free API credits · Microsoft Mixture-of-Experts model for balanced throughput.",
+    note: "100% Permanent Free · 450 tokens/sec wafer-scale 70B recruiter reasoning with zero lag.",
     browserDirect: true,
     supportsJsonMode: true,
     recommendedConcurrency: 2,
   },
 
-  // ---------- Google Gemini (Generous Free Tier) ----------
+  // =========================================================================
+  // 🌐 3. GOOGLE GEMINI (100% Permanent Free Tier · 1,500 Assessments/Day)
+  // =========================================================================
   {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",
     provider: "gemini",
     tag: "Recommended",
-    note: "Google AI Studio · Ultra-fast, highly accurate reasoning and broad skill parsing.",
+    note: "100% Permanent Free · 1,500 daily requests, 15 RPM, 1M context. Flawless structured JSON.",
     browserDirect: true,
     supportsJsonMode: true,
     recommendedConcurrency: 2,
-  },
-  {
-    id: "gemini-2.5-pro",
-    label: "Gemini 2.5 Pro",
-    provider: "gemini",
-    tag: "Deep Reasoning",
-    note: "Google AI Studio · Deepest reasoning and exhaustive resume critique.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 1,
   },
   {
     id: "gemini-2.0-flash",
     label: "Gemini 2.0 Flash",
     provider: "gemini",
     tag: "High Speed",
-    note: "Google AI Studio · High throughput flash model for large resume batches.",
+    note: "100% Permanent Free · Next-gen flash architecture for massive non-stop resume batches.",
     browserDirect: true,
     supportsJsonMode: true,
-    recommendedConcurrency: 2,
+    recommendedConcurrency: 3,
   },
   {
     id: "gemini-1.5-flash",
     label: "Gemini 1.5 Flash",
     provider: "gemini",
     tag: "High Rate Limit",
-    note: "Google AI Studio · Stable 15 RPM free tier with low token latency.",
+    note: "100% Permanent Free · Stable 15 RPM free tier with low token latency.",
     browserDirect: true,
     supportsJsonMode: true,
-    recommendedConcurrency: 2,
+    recommendedConcurrency: 3,
   },
   {
-    id: "gemini-1.5-pro",
-    label: "Gemini 1.5 Pro",
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
     provider: "gemini",
     tag: "Deep Reasoning",
-    note: "Google AI Studio · 1M+ token context window for comprehensive audits.",
+    note: "100% Permanent Free · Deepest hiring manager reasoning and exhaustive candidate critique.",
     browserDirect: true,
     supportsJsonMode: true,
     recommendedConcurrency: 1,
   },
 
-  // ---------- LiteLLM Proxy Gateway (100+ Models) ----------
+  // =========================================================================
+  // 🔀 4. OPENROUTER FREE TIER (:free Permanent Community Models)
+  // =========================================================================
+  {
+    id: "deepseek/deepseek-r1:free",
+    label: "DeepSeek R1 (OpenRouter :free)",
+    provider: "openrouter",
+    tag: "Deep Reasoning",
+    note: "100% Free · Uncapped deep chain-of-thought reasoning without paying API fees.",
+    browserDirect: true,
+    supportsJsonMode: false,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "meta-llama/llama-3.3-70b-instruct:free",
+    label: "Llama 3.3 70B (OpenRouter :free)",
+    provider: "openrouter",
+    tag: "Recommended",
+    note: "100% Free · Meta's flagship 70B model served through open community endpoints.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "qwen/qwen-2.5-coder-32b-instruct:free",
+    label: "Qwen 2.5 Coder 32B (OpenRouter :free)",
+    provider: "openrouter",
+    tag: "Code & Tech",
+    note: "100% Free · Expert software development and technical stack parsing.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "mistralai/mistral-small-24b-instruct:free",
+    label: "Mistral Small 24B (OpenRouter :free)",
+    provider: "openrouter",
+    tag: "High Rate Limit",
+    note: "100% Free · Fast, structured, low-latency resume assessment.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+
+  // =========================================================================
+  // 💻 5. LOCAL OFFLINE OLLAMA (100% Free · Unlimited · Zero Rate Limit)
+  // =========================================================================
+  {
+    id: "llama3.2",
+    label: "Local Ollama — Llama 3.2 (3B/8B)",
+    provider: "ollama",
+    tag: "Unlimited Offline",
+    note: "100% Free & Private · Zero rate limits, zero API keys. Screens 1,000+ resumes completely offline.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "qwen2.5-coder",
+    label: "Local Ollama — Qwen 2.5 Coder (7B/14B)",
+    provider: "ollama",
+    tag: "Unlimited Offline",
+    note: "100% Free & Private · Unrestricted local technical evaluation for software candidates.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "mistral",
+    label: "Local Ollama — Mistral (7B)",
+    provider: "ollama",
+    tag: "Unlimited Offline",
+    note: "100% Free & Private · Highly reliable local JSON output on localhost:11434.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+
+  // =========================================================================
+  // 🟢 6. NVIDIA NIM (1,000 Free Credits)
+  // =========================================================================
+  {
+    id: "meta/llama-3.3-70b-instruct",
+    label: "Llama 3.3 70B Instruct (NVIDIA)",
+    provider: "nvidia",
+    tag: "Recommended",
+    note: "Free API credits · Recruiter-quality feedback & TensorRT acceleration.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 1,
+  },
+  {
+    id: "meta/llama-3.1-8b-instruct",
+    label: "Llama 3.1 8B Instruct (NVIDIA)",
+    provider: "nvidia",
+    tag: "High Rate Limit",
+    note: "Free API credits · Highest throughput & maximum RPM rate limit.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 3,
+  },
+  {
+    id: "mistralai/mistral-small-24b-instruct",
+    label: "Mistral Small 24B (NVIDIA)",
+    provider: "nvidia",
+    tag: "High Rate Limit",
+    note: "Free API credits · Fast, sharp technical critique & structured JSON.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+  {
+    id: "qwen/qwen2.5-coder-32b-instruct",
+    label: "Qwen 2.5 Coder 32B (NVIDIA)",
+    provider: "nvidia",
+    tag: "Code & Tech",
+    note: "Free API credits · Specialized for software engineering & architectures.",
+    browserDirect: true,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+  },
+
+  // =========================================================================
+  // 🔗 7. LiteLLM Proxy Gateway & Custom Endpoints
+  // =========================================================================
   {
     id: "litellm-proxy",
     label: "LiteLLM Proxy (Custom Gateway)",
@@ -249,90 +295,18 @@ export const MODELS: ModelOption[] = [
     recommendedConcurrency: 2,
   },
   {
-    id: "gpt-4o-mini",
-    label: "LiteLLM — GPT-4o Mini",
-    provider: "litellm",
-    tag: "High Speed",
-    note: "Route OpenAI gpt-4o-mini through your LiteLLM Proxy.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 3,
-  },
-  {
-    id: "gpt-4o",
-    label: "LiteLLM — GPT-4o",
-    provider: "litellm",
-    tag: "Deep Reasoning",
-    note: "Route OpenAI flagship GPT-4o through your LiteLLM Proxy.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-  {
-    id: "claude-3-5-sonnet-20241022",
-    label: "LiteLLM — Claude 3.5 Sonnet",
-    provider: "litellm",
-    tag: "Recommended",
-    note: "Route Anthropic Claude 3.5 Sonnet through your LiteLLM Proxy.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-  {
-    id: "claude-3-5-haiku-20241022",
-    label: "LiteLLM — Claude 3.5 Haiku",
-    provider: "litellm",
-    tag: "High Speed",
-    note: "Route Anthropic Claude 3.5 Haiku for lightning-speed screening.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 3,
-  },
-  {
-    id: "ollama/llama3.2",
-    label: "LiteLLM — Ollama Local Llama 3.2",
-    provider: "litellm",
-    tag: "High Rate Limit",
-    note: "100% free and private offline screening via local Ollama routed by LiteLLM.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 2,
-  },
-
-  // ---------- Free Local / Custom Compatible Endpoints ----------
-  {
     id: "custom",
-    label: "Custom Endpoint (Groq Free / Local Ollama)",
+    label: "Custom Endpoint / vLLM / Local Server",
     provider: "openai-compatible",
     tag: "High Rate Limit",
-    note: "Connect directly to Groq (30 RPM free), Ollama (100% free offline), or vLLM.",
+    note: "Connect to any custom OpenAI-compatible URL or local vLLM cluster.",
     browserDirect: true,
     supportsJsonMode: true,
     recommendedConcurrency: 2,
-  },
-  {
-    id: "groq/llama-3.3-70b-versatile",
-    label: "Groq — Llama 3.3 70B Versatile",
-    provider: "openai-compatible",
-    tag: "High Speed",
-    note: "Ultra-fast LPUs on Groq API (https://api.groq.com/openai/v1) with 300+ tok/s.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 3,
-  },
-  {
-    id: "groq/llama-3.1-8b-instant",
-    label: "Groq — Llama 3.1 8B Instant",
-    provider: "openai-compatible",
-    tag: "High Rate Limit",
-    note: "Instant 500+ tok/s screening with high rate limits on Groq.",
-    browserDirect: true,
-    supportsJsonMode: true,
-    recommendedConcurrency: 4,
   },
 ];
 
-export const DEFAULT_MODEL_ID = "meta/llama-3.3-70b-instruct";
+export const DEFAULT_MODEL_ID = "llama-3.3-70b-versatile";
 
 export function findModel(id: string): ModelOption {
   return MODELS.find((m) => m.id === id) ?? MODELS.find((m) => m.id === DEFAULT_MODEL_ID)!;
@@ -349,10 +323,14 @@ export function modelsByProvider(): Record<ProviderId, ModelOption[]> {
 }
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
-  nvidia: "NVIDIA NIM (Free 1,000 Credits)",
-  gemini: "Google Gemini (Free Tier)",
-  litellm: "LiteLLM Proxy (Multi-Provider)",
-  "openai-compatible": "Custom / Groq Free / Local",
+  groq: "⚡ Groq Cloud (100% Free · 14,400/Day · 500+ tok/s)",
+  cerebras: "🚀 Cerebras Wafer-Scale (100% Free · 1,800 tok/s)",
+  gemini: "🌐 Google Gemini (100% Free · 1,500/Day · 1M Context)",
+  openrouter: "🔀 OpenRouter (:free Models · 100% Free)",
+  ollama: "💻 Local Ollama (100% Free · Unlimited · 0 Rate Limit)",
+  nvidia: "🟢 NVIDIA NIM (1,000 Free Credits)",
+  litellm: "🔗 LiteLLM Proxy Gateway",
+  "openai-compatible": "🛠️ Custom Endpoint / vLLM",
 };
 
 export const MODEL_COUNT = MODELS.length;

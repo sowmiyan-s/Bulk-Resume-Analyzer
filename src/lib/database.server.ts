@@ -20,8 +20,11 @@ export interface StoredMongoAnalysis {
 }
 
 export interface AdminSystemSettings {
-  nvidiaApiKey?: string;
+  groqApiKey?: string;
+  cerebrasApiKey?: string;
+  openrouterApiKey?: string;
   geminiApiKey?: string;
+  nvidiaApiKey?: string;
   defaultRole?: string;
   companyName?: string;
   defaultModelId?: string;
@@ -208,6 +211,15 @@ export const saveAdminSettingsFn = createServerFn({ method: "POST" })
         updatedAt: new Date().toISOString(),
       };
 
+      if (data.settings.groqApiKey !== undefined) {
+        updateData["groqApiKey"] = data.settings.groqApiKey.trim();
+      }
+      if (data.settings.cerebrasApiKey !== undefined) {
+        updateData["cerebrasApiKey"] = data.settings.cerebrasApiKey.trim();
+      }
+      if (data.settings.openrouterApiKey !== undefined) {
+        updateData["openrouterApiKey"] = data.settings.openrouterApiKey.trim();
+      }
       if (data.settings.nvidiaApiKey !== undefined) {
         updateData["nvidiaApiKey"] = data.settings.nvidiaApiKey.trim();
       }
@@ -250,6 +262,27 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       const count = await db.collection("analyses").countDocuments().catch(() => 0);
       const ping = await pingMongo();
 
+      const groqKey =
+        (config?.["groqApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
+        "";
+
+      const cerebrasKey =
+        (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
+        "";
+
+      const openrouterKey =
+        (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
+        "";
+
       const nvidiaKey =
         (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
         (typeof process !== "undefined" &&
@@ -267,6 +300,9 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       return {
         success: true,
         settings: {
+          groqApiKey: groqKey,
+          cerebrasApiKey: cerebrasKey,
+          openrouterApiKey: openrouterKey,
           nvidiaApiKey: nvidiaKey,
           geminiApiKey: geminiKey,
           defaultRole:
@@ -286,6 +322,9 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       return {
         success: true,
         settings: {
+          groqApiKey: "",
+          cerebrasApiKey: "",
+          openrouterApiKey: "",
           nvidiaApiKey: "",
           geminiApiKey: "",
           defaultRole: "Software Engineer (Entry Level)",
@@ -302,7 +341,12 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
 
 /** Test an API Key against the provider */
 export const testApiKeyFn = createServerFn({ method: "POST" })
-  .validator((data: { provider: "nvidia" | "gemini"; apiKey?: string }) => data)
+  .validator(
+    (data: {
+      provider: "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
+      apiKey?: string;
+    }) => data,
+  )
   .handler(async ({ data }) => {
     let key = data.apiKey?.trim();
     if (!key || key === "trigger-database-vault-test") {
@@ -310,7 +354,28 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
         const db = await getDb();
         const col = db.collection("system_settings");
         const config = await col.findOne({ key: "global_config" });
-        if (data.provider === "gemini") {
+        if (data.provider === "groq") {
+          key =
+            (config?.["groqApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
+            "";
+        } else if (data.provider === "cerebras") {
+          key =
+            (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
+            "";
+        } else if (data.provider === "openrouter") {
+          key =
+            (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
+            "";
+        } else if (data.provider === "gemini") {
           key =
             (config?.["geminiApiKey"] as string | undefined)?.trim() ||
             (typeof process !== "undefined" &&
@@ -333,8 +398,54 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
     if (!key) {
       return {
         success: false,
-        message: `No API key configured in MongoDB Vault for ${data.provider === "gemini" ? "Google Gemini" : "NVIDIA NIM"}. Please add it in Admin Panel (/admin).`,
+        message: `No API key configured in MongoDB Vault for ${data.provider.toUpperCase()}. Please add it in Admin Panel (/admin).`,
       };
+    }
+
+    if (data.provider === "groq") {
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: "llama-3.1-8b-instant",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working!" };
+        const err = await res.text().catch(() => "");
+        return { success: false, message: `Groq check failed (${res.status}): ${err}` };
+      } catch (e) {
+        return { success: false, message: `Groq connection failed: ${String(e)}` };
+      }
+    }
+
+    if (data.provider === "cerebras") {
+      try {
+        const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: "llama3.1-8b",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) return { success: true, message: "Cerebras API key is valid and working!" };
+        const err = await res.text().catch(() => "");
+        return { success: false, message: `Cerebras check failed (${res.status}): ${err}` };
+      } catch (e) {
+        return { success: false, message: `Cerebras connection failed: ${String(e)}` };
+      }
     }
 
     if (data.provider === "gemini") {
@@ -398,6 +509,27 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
     const col = db.collection("system_settings");
     const config = await col.findOne({ key: "global_config" });
 
+    const hasServerGroqKey = Boolean(
+      (config?.["groqApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])?.trim())),
+    );
+
+    const hasServerCerebrasKey = Boolean(
+      (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])?.trim())),
+    );
+
+    const hasServerOpenRouterKey = Boolean(
+      (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])?.trim())),
+    );
+
     const hasServerNvidiaKey = Boolean(
       (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
       (typeof process !== "undefined" &&
@@ -414,6 +546,9 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
 
     return {
       success: true,
+      hasServerGroqKey,
+      hasServerCerebrasKey,
+      hasServerOpenRouterKey,
       hasServerNvidiaKey,
       hasServerGeminiKey,
       defaultRole:
@@ -423,6 +558,11 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       databaseConnected: true,
     };
   } catch {
+    const hasEnvGroq = Boolean(
+      typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])?.trim()),
+    );
     const hasEnvNvidia = Boolean(
       typeof process !== "undefined" &&
         process.env &&
@@ -436,6 +576,9 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
 
     return {
       success: false,
+      hasServerGroqKey: hasEnvGroq,
+      hasServerCerebrasKey: false,
+      hasServerOpenRouterKey: false,
       hasServerNvidiaKey: hasEnvNvidia,
       hasServerGeminiKey: hasEnvGemini,
       defaultRole: "Software Engineer (Entry Level)",
