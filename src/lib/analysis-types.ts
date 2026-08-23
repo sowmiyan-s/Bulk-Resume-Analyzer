@@ -262,15 +262,6 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     };
   });
 
-  const sumBreakdown = breakdown.length >= 3 ? breakdown.reduce((acc, b) => acc + b.score, 0) : 0;
-  const rawOverall = num(pick(o, "overall_score", "overallScore", "atsScore", "score"));
-  const overallScore =
-    rawOverall > 0
-      ? clamp(rawOverall)
-      : sumBreakdown > 0
-        ? clamp(sumBreakdown)
-        : 75;
-
   // When a JD is supplied the framing is company-fit; otherwise we fall back to
   // the role the model inferred (or the officer-supplied default role).
   const jdRawObj = (jdRaw ?? {}) as Record<string, unknown>;
@@ -278,6 +269,19 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     rawJdScore !== undefined ||
     (jdRawObj && (Object.keys(jdRawObj).length > 0 || jdRawObj["verdict"] || jdRawObj["score"]));
   const basis: "role-fit" | "jd-fit" = hasJd ? "jd-fit" : "role-fit";
+
+  const jdScoreNum = rawJdScore !== undefined && rawJdScore !== null ? clamp(num(rawJdScore)) : null;
+  const sumBreakdown = breakdown.length >= 3 ? breakdown.reduce((acc, b) => acc + b.score, 0) : 0;
+  const rawOverall = num(pick(o, "overall_score", "overallScore", "atsScore", "score"));
+
+  const overallScore =
+    hasJd && jdScoreNum !== null && jdScoreNum > 0
+      ? jdScoreNum
+      : rawOverall > 0
+        ? clamp(rawOverall)
+        : sumBreakdown > 0
+          ? clamp(sumBreakdown)
+          : 75;
   const inferredRole = str(
     pick(
       o,
