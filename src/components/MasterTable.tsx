@@ -94,8 +94,10 @@ export function MasterTable({
         (TIER_ORDER[a.analysis.readinessTier] ?? 99) - (TIER_ORDER[b.analysis.readinessTier] ?? 99),
       jd: (a, b) => (a.analysis.jdScore ?? -1) - (b.analysis.jdScore ?? -1),
       issues: (a, b) =>
-        (a.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length -
-        (b.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length,
+        ((a.analysis.criticalIssues || []).length +
+          (a.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length * 5) -
+        ((b.analysis.criticalIssues || []).length +
+          (b.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length * 5),
       missing: (a, b) =>
         (a.analysis.skillMatrix?.missing || []).length -
         (b.analysis.skillMatrix?.missing || []).length,
@@ -322,7 +324,8 @@ export function MasterTable({
               {sorted.map((row, index) => {
                 const a = row.analysis;
                 const score = effectiveScore(a);
-                const critical = a.criticalIssues.filter((i) => i.severity === "critical").length;
+                const totalIssues = (a.criticalIssues || []).length;
+                const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
                 const isSelected = selectedIds.has(row.id);
 
                 return (
@@ -393,10 +396,18 @@ export function MasterTable({
                     <TableCell>
                       <span
                         className={`text-xs font-medium ${
-                          critical > 0 ? "text-destructive" : "text-muted-foreground"
+                          critical > 0
+                            ? "text-destructive font-semibold"
+                            : totalIssues > 0
+                              ? "text-amber-600 dark:text-amber-400 font-semibold"
+                              : "text-muted-foreground"
                         }`}
                       >
-                        {critical > 0 ? `${critical} critical` : "0 issues"}
+                        {totalIssues === 0
+                          ? "0 issues"
+                          : critical > 0
+                            ? `${totalIssues} ${totalIssues === 1 ? "issue" : "issues"} (${critical} crit)`
+                            : `${totalIssues} ${totalIssues === 1 ? "issue" : "issues"}`}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">

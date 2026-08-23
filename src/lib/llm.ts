@@ -88,10 +88,11 @@ evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit"
 overall_score:int 0-100 (BALANCED BENCHMARK SCORE: Sum of the 4 breakdown categories below)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
 score_breakdown:[{category:"Technical Stack & Skill Depth"|"Project Architecture & Complexity"|"Practical Experience & Track Record"|"ATS Format & Section Structure",score:int,max:int,note:string}] exactly 4 rows with maxes: 35, 35, 20, 10 (sum to 100)
+jd_match:{score:int 0-100,verdict:string} (required: calculate overall 0-100 percentage match against the target Job Description or target role, with concise verdict)
 recruiter_first_impression:string (<=35 words: objective technical assessment based on overall competencies)
 hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on demonstrated skills)
 strengths:[string] max 3 (top technical competencies, e.g. 'Strong backend with FastAPI & Docker', 'Multi-agent AI implementation')
-critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 0-4 items. ONLY real technical gaps or structural anti-patterns. Return [] if no serious issues.
+critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 1-4 items of real technical gaps, missing requirements, or anti-patterns (use "critical" for major red flags, "major" for important gaps, "minor" for small polish). Return [] only if resume has no issues.
 grammar_and_ocr_errors:[string] 0-2 items. ONLY genuine unreadable OCR glitches. Return [] if readable.
 formatting_problems:[string] 0-2 items. Genuine ATS blockers (e.g. 2 pages when 1 is appropriate for student, embedded photo, obsolete declaration). Return [] if clean.
 skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (List verified technical keywords)

@@ -275,12 +275,12 @@ export function normalizeAnalysis(raw: unknown): Analysis {
   const rawOverall = num(pick(o, "overall_score", "overallScore", "atsScore", "score"));
 
   const overallScore =
-    hasJd && jdScoreNum !== null && jdScoreNum > 0
-      ? jdScoreNum
-      : rawOverall > 0
-        ? clamp(rawOverall)
-        : sumBreakdown > 0
-          ? clamp(sumBreakdown)
+    rawOverall > 0
+      ? clamp(rawOverall)
+      : sumBreakdown > 0
+        ? clamp(sumBreakdown)
+        : jdScoreNum !== null && jdScoreNum > 0
+          ? jdScoreNum
           : 75;
   const inferredRole = str(
     pick(
