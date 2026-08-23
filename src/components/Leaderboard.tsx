@@ -12,7 +12,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TIER_ORDER, effectiveScore, tierTone, type Analysis } from "@/lib/analysis-types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  TIER_ORDER,
+  effectiveScore,
+  tierTone,
+  SCORE_CATEGORIES,
+  getScoreCategory,
+  type Analysis,
+  type ScoreCategoryId,
+} from "@/lib/analysis-types";
 
 export type LeaderRow = {
   id: string;
@@ -23,12 +38,6 @@ export type LeaderRow = {
 type SortKey = "rank" | "name" | "score" | "tier" | "jd" | "issues" | "structure";
 
 const tierShort = (tier: string) => tier.replace(/^Tier \d: /, "");
-
-function scoreTone(score: number) {
-  if (score >= 75) return "bg-success/15 text-success border-success/30";
-  if (score >= 55) return "bg-warning/15 text-warning border-warning/30";
-  return "bg-destructive/15 text-destructive border-destructive/30";
-}
 
 function rankMedal(rank: number) {
   if (rank === 1) return "text-amber-500";
@@ -54,6 +63,7 @@ export function Leaderboard({
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("all");
+  const [scoreFilter, setScoreFilter] = useState<ScoreCategoryId>("all");
 
   const tierCounts = useMemo(
     () => ({
@@ -65,12 +75,33 @@ export function Leaderboard({
     [rows],
   );
 
+  const scoreCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: rows.length };
+    for (const cat of SCORE_CATEGORIES) {
+      if (cat.id === "all") continue;
+      counts[cat.id] = rows.filter((r) => {
+        const score = effectiveScore(r.analysis);
+        return score >= cat.min && score <= cat.max;
+      }).length;
+    }
+    return counts;
+  }, [rows]);
+
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = rows.filter((r) => {
       if (!r || !r.analysis) return false;
       const tier = r.analysis.readinessTier || "";
       if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
+
+      if (scoreFilter !== "all") {
+        const cat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
+        if (cat) {
+          const score = effectiveScore(r.analysis);
+          if (score < cat.min || score > cat.max) return false;
+        }
+      }
+
       if (!q) return true;
       const a = r.analysis;
       return (
@@ -156,26 +187,85 @@ export function Leaderboard({
             className="h-9 pl-9 text-xs rounded-lg bg-secondary/40 border-border"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-secondary/40 p-1">
-          {filterOptions.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setTierFilter(opt.id)}
-              className={`h-7 rounded-md px-3 text-xs font-medium transition-all ${
-                tierFilter === opt.id
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Score Range Category Selector */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground hidden sm:inline">
+              Score Range:
+            </span>
+            <Select
+              value={scoreFilter}
+              onValueChange={(v) => setScoreFilter(v as ScoreCategoryId)}
             >
-              {opt.label}
-              <span className="ml-1.5 rounded-full bg-background/60 px-1.5 py-0.2 font-mono text-[10px]">
-                {opt.count}
-              </span>
-            </button>
-          ))}
+              <SelectTrigger className="h-8 min-w-[170px] text-xs font-medium rounded-lg bg-secondary/40 border-border">
+                <SelectValue placeholder="Score Category" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                {SCORE_CATEGORIES.map((cat) => {
+                  const count = scoreCounts[cat.id] ?? 0;
+                  return (
+                    <SelectItem key={cat.id} value={cat.id} className="text-xs py-1.5">
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="font-medium">{cat.label}</span>
+                        <span className="ml-auto rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {count}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-secondary/40 p-1">
+            {filterOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTierFilter(opt.id)}
+                className={`h-7 rounded-md px-3 text-xs font-medium transition-all ${
+                  tierFilter === opt.id
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+                <span className="ml-1.5 rounded-full bg-background/60 px-1.5 py-0.2 font-mono text-[10px]">
+                  {opt.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {scoreFilter !== "all" && (
+        <div className="flex items-center gap-2 px-1 text-xs">
+          <span className="text-muted-foreground">Filtered by:</span>
+          {(() => {
+            const currentCat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
+            if (!currentCat) return null;
+            return (
+              <Badge
+                variant="outline"
+                className={`text-xs font-medium px-2 py-0.5 gap-1 ${currentCat.badgeBg} ${currentCat.badgeText} ${currentCat.badgeBorder}`}
+              >
+                {currentCat.label} ({scoreCounts[currentCat.id] ?? 0})
+                <button
+                  type="button"
+                  onClick={() => setScoreFilter("all")}
+                  className="hover:opacity-75 ml-0.5 inline-flex"
+                  aria-label="Remove score filter"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            );
+          })()}
+        </div>
+      )}
 
       <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
@@ -252,13 +342,17 @@ export function Leaderboard({
                       </p>
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={`inline-flex items-center justify-center rounded-md px-2.5 py-0.5 font-mono text-xs font-bold border ${scoreTone(
-                          score,
-                        )}`}
-                      >
-                        {score}
-                      </span>
+                      {(() => {
+                        const cat = getScoreCategory(score);
+                        return (
+                          <span
+                            className={`inline-flex items-center justify-center rounded-md px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`}
+                            title={`${cat.label} — ${cat.description}`}
+                          >
+                            {score}
+                          </span>
+                        );
+                      })()}
                       {a.manualScore !== null && (
                         <span className="ml-1 text-[10px] uppercase text-muted-foreground">
                           edited

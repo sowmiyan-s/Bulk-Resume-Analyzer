@@ -56,6 +56,169 @@ export type StructureAssessment = {
   notes: string[];
 };
 
+export type ScoreCategoryId =
+  | "all"
+  | "90-100"
+  | "80-90"
+  | "70-80"
+  | "60-70"
+  | "50-60"
+  | "40-50"
+  | "30-40"
+  | "20-30"
+  | "10-20"
+  | "below-10";
+
+export type ScoreCategoryDef = {
+  id: ScoreCategoryId;
+  label: string;
+  shortLabel: string;
+  min: number;
+  max: number;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  description: string;
+};
+
+export const SCORE_CATEGORIES: ScoreCategoryDef[] = [
+  {
+    id: "all",
+    label: "All Candidates",
+    shortLabel: "All",
+    min: 0,
+    max: 100,
+    badgeBg: "bg-secondary",
+    badgeBorder: "border-border",
+    badgeText: "text-foreground",
+    description: "All evaluated candidates",
+  },
+  {
+    id: "90-100",
+    label: "90–100 (Exceptional)",
+    shortLabel: "90–100",
+    min: 90,
+    max: 100,
+    badgeBg: "bg-emerald-500/15",
+    badgeBorder: "border-emerald-500/30",
+    badgeText: "text-emerald-600 dark:text-emerald-400",
+    description: "Exceptional / Production-Ready",
+  },
+  {
+    id: "80-90",
+    label: "80–89 (High Match)",
+    shortLabel: "80–89",
+    min: 80,
+    max: 89,
+    badgeBg: "bg-teal-500/15",
+    badgeBorder: "border-teal-500/30",
+    badgeText: "text-teal-600 dark:text-teal-400",
+    description: "High Match & Solid Depth",
+  },
+  {
+    id: "70-80",
+    label: "70–79 (Good / Polish)",
+    shortLabel: "70–79",
+    min: 70,
+    max: 79,
+    badgeBg: "bg-sky-500/15",
+    badgeBorder: "border-sky-500/30",
+    badgeText: "text-sky-600 dark:text-sky-400",
+    description: "Good Foundation, Minor Polish",
+  },
+  {
+    id: "60-70",
+    label: "60–69 (Moderate)",
+    shortLabel: "60–69",
+    min: 60,
+    max: 69,
+    badgeBg: "bg-amber-500/15",
+    badgeBorder: "border-amber-500/30",
+    badgeText: "text-amber-600 dark:text-amber-400",
+    description: "Moderate / Basic Projects",
+  },
+  {
+    id: "50-60",
+    label: "50–59 (Basic Foundation)",
+    shortLabel: "50–59",
+    min: 50,
+    max: 59,
+    badgeBg: "bg-yellow-500/15",
+    badgeBorder: "border-yellow-500/30",
+    badgeText: "text-yellow-600 dark:text-yellow-400",
+    description: "Basic Junior Foundation",
+  },
+  {
+    id: "40-50",
+    label: "40–49 (Significant Gaps)",
+    shortLabel: "40–49",
+    min: 40,
+    max: 49,
+    badgeBg: "bg-orange-500/15",
+    badgeBorder: "border-orange-500/30",
+    badgeText: "text-orange-600 dark:text-orange-400",
+    description: "Significant Skill Gaps",
+  },
+  {
+    id: "30-40",
+    label: "30–39 (Low Fit)",
+    shortLabel: "30–39",
+    min: 30,
+    max: 39,
+    badgeBg: "bg-orange-600/15",
+    badgeBorder: "border-orange-600/30",
+    badgeText: "text-orange-700 dark:text-orange-400",
+    description: "Low Fit / Major Missing Competencies",
+  },
+  {
+    id: "20-30",
+    label: "20–29 (Minimal)",
+    shortLabel: "20–29",
+    min: 20,
+    max: 29,
+    badgeBg: "bg-red-500/15",
+    badgeBorder: "border-red-500/30",
+    badgeText: "text-red-500 dark:text-red-400",
+    description: "Minimal Relevance",
+  },
+  {
+    id: "10-20",
+    label: "10–19 (Very Weak)",
+    shortLabel: "10–19",
+    min: 10,
+    max: 19,
+    badgeBg: "bg-rose-600/15",
+    badgeBorder: "border-rose-600/30",
+    badgeText: "text-rose-600 dark:text-rose-400",
+    description: "Very Weak / Severe Flaws",
+  },
+  {
+    id: "below-10",
+    label: "Below 10 (Unsuitable)",
+    shortLabel: "<10",
+    min: 0,
+    max: 9,
+    badgeBg: "bg-rose-950/20",
+    badgeBorder: "border-rose-900/40",
+    badgeText: "text-rose-700 dark:text-rose-300",
+    description: "Unsuitable / Incompatible",
+  },
+];
+
+export function getScoreCategory(score: number): ScoreCategoryDef {
+  const s = Math.max(0, Math.min(100, Math.round(score)));
+  if (s >= 90) return SCORE_CATEGORIES[1]!;
+  if (s >= 80) return SCORE_CATEGORIES[2]!;
+  if (s >= 70) return SCORE_CATEGORIES[3]!;
+  if (s >= 60) return SCORE_CATEGORIES[4]!;
+  if (s >= 50) return SCORE_CATEGORIES[5]!;
+  if (s >= 40) return SCORE_CATEGORIES[6]!;
+  if (s >= 30) return SCORE_CATEGORIES[7]!;
+  if (s >= 20) return SCORE_CATEGORIES[8]!;
+  if (s >= 10) return SCORE_CATEGORIES[9]!;
+  return SCORE_CATEGORIES[10]!;
+}
+
 export type Analysis = {
   candidateName: string;
   role: string;

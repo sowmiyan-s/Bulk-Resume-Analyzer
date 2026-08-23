@@ -22,7 +22,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TIER_ORDER, effectiveScore, tierTone, type Analysis } from "@/lib/analysis-types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  TIER_ORDER,
+  effectiveScore,
+  tierTone,
+  SCORE_CATEGORIES,
+  getScoreCategory,
+  type Analysis,
+  type ScoreCategoryId,
+} from "@/lib/analysis-types";
 
 export type MasterRow = {
   id: string;
@@ -55,6 +70,7 @@ export function MasterTable({
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("all");
+  const [scoreFilter, setScoreFilter] = useState<ScoreCategoryId>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tierCounts = useMemo(() => {
@@ -66,12 +82,33 @@ export function MasterTable({
     };
   }, [rows]);
 
+  const scoreCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: rows.length };
+    for (const cat of SCORE_CATEGORIES) {
+      if (cat.id === "all") continue;
+      counts[cat.id] = rows.filter((r) => {
+        const score = effectiveScore(r.analysis);
+        return score >= cat.min && score <= cat.max;
+      }).length;
+    }
+    return counts;
+  }, [rows]);
+
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = rows.filter((r) => {
       if (!r || !r.analysis) return false;
       const tier = r.analysis.readinessTier || "";
       if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
+
+      if (scoreFilter !== "all") {
+        const cat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
+        if (cat) {
+          const score = effectiveScore(r.analysis);
+          if (score < cat.min || score > cat.max) return false;
+        }
+      }
+
       if (!q) return true;
       const a = r.analysis;
       return (
@@ -194,7 +231,7 @@ export function MasterTable({
   return (
     <div className="space-y-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -204,27 +241,87 @@ export function MasterTable({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 bg-secondary/30 p-1 rounded-xl border border-border/80">
-          {filterOptions.map((opt) => (
-            <Button
-              key={opt.id}
-              size="sm"
-              variant={tierFilter === opt.id ? "secondary" : "ghost"}
-              className={`h-7 px-3 text-xs font-medium rounded-lg transition-all ${
-                tierFilter === opt.id
-                  ? "bg-card text-foreground font-semibold shadow-sm border border-border/60"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => setTierFilter(opt.id)}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Score Range Category Selector */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground hidden sm:inline">
+              Score Range:
+            </span>
+            <Select
+              value={scoreFilter}
+              onValueChange={(v) => setScoreFilter(v as ScoreCategoryId)}
             >
-              {opt.label}
-              <span className="ml-1.5 rounded-full bg-secondary px-1.5 py-0.2 font-mono text-[10px] text-muted-foreground">
-                {opt.count}
-              </span>
-            </Button>
-          ))}
+              <SelectTrigger className="h-8 min-w-[175px] text-xs font-medium rounded-xl bg-secondary/30 border-border/80">
+                <SelectValue placeholder="Score Category" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                {SCORE_CATEGORIES.map((cat) => {
+                  const count = scoreCounts[cat.id] ?? 0;
+                  return (
+                    <SelectItem key={cat.id} value={cat.id} className="text-xs py-1.5">
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="font-medium">{cat.label}</span>
+                        <span className="ml-auto rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {count}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Readiness Tier Chips */}
+          <div className="flex flex-wrap items-center gap-1 bg-secondary/30 p-1 rounded-xl border border-border/80">
+            {filterOptions.map((opt) => (
+              <Button
+                key={opt.id}
+                size="sm"
+                variant={tierFilter === opt.id ? "secondary" : "ghost"}
+                className={`h-7 px-2.5 text-xs font-medium rounded-lg transition-all ${
+                  tierFilter === opt.id
+                    ? "bg-card text-foreground font-semibold shadow-sm border border-border/60"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setTierFilter(opt.id)}
+              >
+                {opt.label}
+                <span className="ml-1 rounded-full bg-secondary px-1.5 py-0.2 font-mono text-[10px] text-muted-foreground">
+                  {opt.count}
+                </span>
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* Active Category Indicator / Quick Reset */}
+      {scoreFilter !== "all" && (
+        <div className="flex items-center gap-2 px-1 text-xs">
+          <span className="text-muted-foreground">Filtered by:</span>
+          {(() => {
+            const currentCat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
+            if (!currentCat) return null;
+            return (
+              <Badge
+                variant="outline"
+                className={`text-xs font-medium px-2 py-0.5 gap-1 ${currentCat.badgeBg} ${currentCat.badgeText} ${currentCat.badgeBorder}`}
+              >
+                {currentCat.label} ({scoreCounts[currentCat.id] ?? 0})
+                <button
+                  type="button"
+                  onClick={() => setScoreFilter("all")}
+                  className="hover:opacity-75 ml-0.5 inline-flex"
+                  aria-label="Remove score filter"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Floating / Inline Bulk Actions Bar */}
       {selectedIds.size > 0 && (
@@ -360,17 +457,17 @@ export function MasterTable({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <span
-                          className={`inline-flex items-center justify-center rounded-lg px-2.5 py-0.5 font-mono text-xs font-bold ${
-                            score >= 75
-                              ? "bg-success/15 text-success border border-success/30"
-                              : score >= 55
-                                ? "bg-warning/15 text-warning border border-warning/30"
-                                : "bg-destructive/15 text-destructive border border-destructive/30"
-                          }`}
-                        >
-                          {score}
-                        </span>
+                        {(() => {
+                          const cat = getScoreCategory(score);
+                          return (
+                            <span
+                              className={`inline-flex items-center justify-center rounded-lg px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`}
+                              title={`${cat.label} — ${cat.description}`}
+                            >
+                              {score}
+                            </span>
+                          );
+                        })()}
                         {a.manualScore !== null && (
                           <span className="text-[10px] font-medium text-muted-foreground uppercase">
                             (edited)

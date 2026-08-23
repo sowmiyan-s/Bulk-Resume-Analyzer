@@ -104,14 +104,22 @@ data_gaps:[{area,missing,impact}] max 3 (missing GitHub/live demo links, missing
 relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}`;
 
 const RULES = `Professional Evaluation & Scoring Standards:
-1. BALANCED BENCHMARKING (FAIR & HOLISTIC):
-   - Evaluate the whole engineer: technical stack breadth, depth of system design, project complexity, and practical experience.
-   - Tier 1 (85-98): Exceptional candidate. Diverse modern tech stack, non-trivial full-stack or systems projects, demonstrable initiative (hackathons, packages, client work, or patents), clean 1-page structure.
-   - Tier 2 (70-84): Solid foundation. Good coursework and working prototypes, but projects may lack deep architectural complexity or production deployment.
-   - Tier 3 (35-69): Needs significant work. Missing core technical depth, superficial claims without project implementation, or severe ATS flaws.
+1. GRANULAR FULL-SPECTRUM SCORING (0-100 CONTINUOUS DISTRIBUTION):
+   - Score candidates dynamically and realistically across the entire 0-100 spectrum. DO NOT default to clustered numbers (e.g. 92, 82, 72, 62) or multiples of 5/10. Use exact, authentic component points (e.g. 33/35, 27/35, 14/20, 8/10 -> 82, or 29+26+13+7 -> 75, 23+19+8+5 -> 55, 16+11+6+4 -> 37, 7+5+2+2 -> 16, etc.).
+   - Calibrate across the 10 standard evaluation categories:
+     * 90–100 (Exceptional): Production-level architecture, deep modern stack, verifiable proof, clean ATS 1-page layout.
+     * 80–89 (High Match): Solid technical depth, full-stack or systems projects, internships/proof, clean format.
+     * 70–79 (Good / Polish): Solid foundation and functional projects, but lacks complex architecture or cloud deployment.
+     * 60–69 (Moderate): Basic tutorial-level projects, limited backend/systems depth, minor formatting gaps.
+     * 50–59 (Basic Foundation): Junior coursework foundation, superficial skills, missing project implementation.
+     * 40–49 (Significant Gaps): Few relevant skills, missing core tools, no live projects or proof.
+     * 30–39 (Low Fit): Minimal technical competency, vague bullet points, weak formatting.
+     * 20–29 (Minimal Relevance): Barely matching role keywords, non-technical or poorly structured.
+     * 10–19 (Very Weak): Severe lack of basic technical knowledge, major ATS red flags.
+     * Below 10 (<10): Blank, corrupted, or completely irrelevant resume.
 
 2. ATS MODERNITY & DOCUMENT STATS:
-   - Check the [DOCUMENT METRICS] header: A 1-page resume is optimal for students/entry-level (score 9-10/10). A 2-page resume with photos and declaration blocks should be noted constructively (score 6-7/10).
+   - Check the [DOCUMENT METRICS] header: A 1-page resume is optimal for students/entry-level (score 8-10/10). A 2-page resume with photos and declaration blocks should be noted constructively (score 4-6/10).
 
 3. GENDER EQUALITY & FAIRNESS:
    - Provide completely neutral, unbiased scoring based 100% on demonstrable technical evidence and project merit.
