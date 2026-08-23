@@ -14,6 +14,8 @@ export interface StoredMongoAnalysis {
   jd_score: number | null;
   created_at: string;
   updated_at: string;
+  clean_text?: string;
+  raw_text?: string;
   analysis: Analysis;
 }
 
@@ -22,6 +24,7 @@ export interface AdminSystemSettings {
   geminiApiKey?: string;
   defaultRole?: string;
   companyName?: string;
+  defaultModelId?: string;
   updatedAt?: string;
 }
 
@@ -42,7 +45,15 @@ function checkAdminPassword(providedPass?: string): boolean {
 
 /** Save / Upsert analysis record to MongoDB Atlas */
 export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { id: string; fileName: string; analysis: Analysis }) => data)
+  .validator(
+    (data: {
+      id: string;
+      fileName: string;
+      analysis: Analysis;
+      cleanText?: string;
+      rawText?: string;
+    }) => data,
+  )
   .handler(async ({ data }) => {
     try {
       const db = await getDb();
@@ -65,6 +76,8 @@ export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
         jd_score: data.analysis.jdScore ?? null,
         created_at: now,
         updated_at: now,
+        clean_text: data.cleanText || "",
+        raw_text: data.rawText || "",
         analysis: data.analysis,
       };
 
@@ -108,6 +121,8 @@ export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(asy
       assumed_role: d.assumed_role,
       jd_score: d.jd_score,
       created_at: d.created_at,
+      clean_text: d.clean_text,
+      raw_text: d.raw_text,
       analysis: d.analysis,
     }));
 
@@ -205,6 +220,9 @@ export const saveAdminSettingsFn = createServerFn({ method: "POST" })
       if (data.settings.companyName !== undefined) {
         updateData["companyName"] = data.settings.companyName.trim();
       }
+      if (data.settings.defaultModelId !== undefined) {
+        updateData["defaultModelId"] = data.settings.defaultModelId.trim();
+      }
 
       await col.updateOne({ key: "global_config" }, { $set: updateData }, { upsert: true });
 
@@ -254,6 +272,7 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
           defaultRole:
             (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
           companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
+          defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
           updatedAt: (config?.["updatedAt"] as string | undefined) || "",
         },
         stats: {
@@ -400,6 +419,7 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       defaultRole:
         (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
       companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
+      defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
       databaseConnected: true,
     };
   } catch {
@@ -420,6 +440,7 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       hasServerGeminiKey: hasEnvGemini,
       defaultRole: "Software Engineer (Entry Level)",
       companyName: "the hiring company",
+      defaultModelId: "",
       databaseConnected: false,
     };
   }

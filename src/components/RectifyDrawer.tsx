@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Sparkles,
   Target,
+  Trash2,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -53,6 +54,9 @@ type Props = {
   ) => void;
   onReanalyze: (id: string) => void;
   onExportPdf: (id: string) => void;
+  onDelete?: (id: string) => void;
+  hasActiveJd?: boolean;
+  onReanalyzeWithJd?: (id: string) => void;
 };
 
 function tierTone(tier: string) {
@@ -79,6 +83,9 @@ export function RectifyDrawer({
   onApply,
   onReanalyze,
   onExportPdf,
+  onDelete,
+  hasActiveJd,
+  onReanalyzeWithJd,
 }: Props) {
   const [notes, setNotes] = useState("");
   const [manual, setManual] = useState<string>("");
@@ -111,6 +118,13 @@ export function RectifyDrawer({
         officerNotes: notes,
       });
     });
+  };
+
+  const handleDeleteCandidate = () => {
+    if (confirm(`Are you sure you want to delete candidate "${a.candidateName}"?`)) {
+      onOpenChange(false);
+      onDelete?.(target.id);
+    }
   };
 
   const copyText = (text: string) => {
@@ -176,23 +190,47 @@ export function RectifyDrawer({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs font-medium rounded-lg"
-                onClick={() => onReanalyze(target.id)}
-              >
-                <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate
-              </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {hasActiveJd && onReanalyzeWithJd ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs font-medium rounded-lg border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
+                  onClick={() => onReanalyzeWithJd(target.id)}
+                  title="Re-evaluate candidate against currently entered Job Description"
+                >
+                  <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate (Current JD)
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs font-medium rounded-lg"
+                  onClick={() => onReanalyze(target.id)}
+                >
+                  <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="default"
                 className="h-8 text-xs font-semibold rounded-lg shadow-sm"
                 onClick={() => onExportPdf(target.id)}
               >
-                <FileDown className="size-3.5 mr-1.5" /> Export PDF Scorecard
+                <FileDown className="size-3.5 mr-1.5" /> Export PDF
               </Button>
+              {onDelete && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  onClick={handleDeleteCandidate}
+                  title="Delete Candidate Record"
+                  aria-label="Delete Candidate Record"
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              )}
             </div>
           </div>
         </SheetHeader>

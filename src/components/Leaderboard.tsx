@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { Award, ChevronDown, ChevronUp, Filter, Trophy } from "lucide-react";
+import { Award, ChevronDown, ChevronUp, Filter, RefreshCw, Trash2, Trophy } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -36,7 +37,19 @@ function rankMedal(rank: number) {
   return "text-muted-foreground";
 }
 
-export function Leaderboard({ rows, onOpen }: { rows: LeaderRow[]; onOpen: (id: string) => void }) {
+export function Leaderboard({
+  rows,
+  onOpen,
+  onDelete,
+  onReevaluate,
+  hasActiveJd,
+}: {
+  rows: LeaderRow[];
+  onOpen: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onReevaluate?: (id: string) => void;
+  hasActiveJd?: boolean;
+}) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState("");
@@ -186,13 +199,16 @@ export function Leaderboard({ rows, onOpen }: { rows: LeaderRow[]; onOpen: (id: 
                 <Th k="issues" className="w-24">
                   Critical
                 </Th>
+                <TableHead className="w-28 text-right text-xs font-semibold text-muted-foreground">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className="divide-y divide-border">
               {sorted.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="py-12 text-center text-xs text-muted-foreground"
                   >
                     No resumes match this filter.
@@ -265,7 +281,7 @@ export function Leaderboard({ rows, onOpen }: { rows: LeaderRow[]; onOpen: (id: 
                     </TableCell>
                     <TableCell className="text-xs font-medium">
                       {a.jdScore !== null ? (
-                        <span className="text-foreground">{a.jdScore}%</span>
+                        <span className="text-foreground font-semibold">{a.jdScore}%</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -278,6 +294,49 @@ export function Leaderboard({ rows, onOpen }: { rows: LeaderRow[]; onOpen: (id: 
                       >
                         {critical > 0 ? `${critical}` : "0"}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div
+                        className="flex justify-end items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs rounded-lg px-2.5 hover:bg-secondary"
+                          onClick={() => onOpen(row.id)}
+                        >
+                          Review
+                        </Button>
+                        {onReevaluate && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            onClick={() => onReevaluate(row.id)}
+                            title={hasActiveJd ? "Re-evaluate with Current JD" : "Re-evaluate candidate"}
+                            aria-label="Re-evaluate candidate"
+                          >
+                            <RefreshCw className="size-3.5" />
+                          </Button>
+                        )}
+                        {onDelete && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => {
+                              if (confirm(`Delete candidate "${a.candidateName}"?`)) {
+                                onDelete(row.id);
+                              }
+                            }}
+                            title="Delete candidate record"
+                            aria-label="Delete candidate record"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

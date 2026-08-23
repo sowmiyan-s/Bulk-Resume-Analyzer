@@ -6,8 +6,10 @@ import {
   LayoutGrid,
   Loader2,
   Play,
+  RefreshCw,
   RotateCcw,
   Shield,
+  Sparkles,
   Square,
   Trash2,
   Trophy,
@@ -30,7 +32,14 @@ import { collectFiles, extractText, type ExtractedFile } from "@/lib/extract";
 import { LlmError, callModel, DEFAULT_SETTINGS, type LlmSettings } from "@/lib/llm";
 import { findModel } from "@/lib/models";
 import { RateLimitedQueue } from "@/lib/queue";
-import { saveAnalysis, loadAnalyses, clearAnalyses, type StoredAnalysis } from "@/lib/storage";
+import {
+  saveAnalysis,
+  loadAnalyses,
+  clearAnalyses,
+  deleteStoredAnalysis,
+  deleteStoredAnalyses,
+  type StoredAnalysis,
+} from "@/lib/storage";
 import { getPublicSystemInfoFn } from "@/lib/database.server";
 import { exportBatchMarkdown, exportCsv, exportScorecardPdf } from "@/lib/report";
 import { sanitizeResumeText, type TextFix } from "@/lib/sanitize";
@@ -75,6 +84,7 @@ export type SystemInfo = {
   hasServerGeminiKey: boolean;
   defaultRole: string;
   companyName: string;
+  defaultModelId?: string;
   databaseConnected?: boolean;
 };
 
@@ -88,14 +98,15 @@ function Index() {
     hasServerGeminiKey: false,
     defaultRole: "Software Engineer (Entry Level)",
     companyName: "the hiring company",
+    defaultModelId: "",
     databaseConnected: true,
   });
   const [items, setItems] = useState<QueueItem[]>([]);
   const [tab, setTab] = useState<"analyze" | "leaderboard">("analyze");
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
-  const [cooldownSec, setCooldownSec] = useState(1);
-  const [concurrency, setConcurrency] = useState(2);
+  const [cooldownSec, setCooldownSec] = useState(70);
+  const [concurrency, setConcurrency] = useState(1);
   const [maxRetries, setMaxRetries] = useState(3);
   const [running, setRunning] = useState(false);
   const [cooldownLeft, setCooldownLeft] = useState(0);
@@ -108,6 +119,17 @@ function Index() {
       const info = await getPublicSystemInfoFn();
       if (info) {
         setSystemInfo(info);
+        if (
+          info.defaultModelId &&
+          typeof window !== "undefined" &&
+          !window.localStorage.getItem("resume-radiance.settings.v1")
+        ) {
+          setSettings((prev) => ({ ...prev, modelId: info.defaultModelId! }));
+          const m = findModel(info.defaultModelId);
+          if (m?.recommendedConcurrency) {
+            setConcurrency(m.recommendedConcurrency);
+          }
+        }
       }
     } catch {
       /* ignore */
@@ -118,6 +140,10 @@ function Index() {
   useEffect(() => {
     const loaded = loadSettings();
     setSettings(loaded);
+    const m = findModel(loaded.modelId);
+    if (m?.recommendedConcurrency) {
+      setConcurrency(m.recommendedConcurrency);
+    }
 
     void refreshSystemInfo();
 
@@ -141,8 +167,8 @@ function Index() {
                   progress: 100,
                   message: "",
                   attempt: 1,
-                  rawText: "",
-                  cleanText: "",
+                  rawText: s.raw_text || "",
+                  cleanText: s.clean_text || "",
                   fixes: [] as TextFix[],
                   warnings: [] as string[],
                   analysis: normalized,
@@ -164,6 +190,10 @@ function Index() {
   const persist = useCallback((next: LlmSettings) => {
     setSettings(next);
     saveSettings(next);
+    const m = findModel(next.modelId);
+    if (m?.recommendedConcurrency) {
+      setConcurrency(m.recommendedConcurrency);
+    }
   }, []);
 
   /* ------------------------------ file intake ----------------------------- */
@@ -243,7 +273,12 @@ function Index() {
 
   /** Extract + sanitize (cached) then call the model with optimistic live phases. */
   const analyzeOne = useCallback(
-    async (item: QueueItem, signal: AbortSignal, attempt: number): Promise<Analysis> => {
+    async (
+      item: QueueItem,
+      signal: AbortSignal,
+      attempt: number,
+      overrideJd?: string | false,
+    ): Promise<Analysis> => {
       let clean = item.cleanText;
       let fixes = item.fixes;
       let warnings = item.warnings;
@@ -251,28 +286,50 @@ function Index() {
 
       // 1. If not yet pre-extracted in the background, extract now:
       if (!clean) {
-        patch(item.id, {
-          status: "extracting",
-          progress: 15,
-          message: "Extracting resume text…",
-          attempt,
-        });
-        raw = await extractText(item.file, (pct) =>
-          patch(item.id, { progress: 15 + pct * 0.25, message: `OCR ${pct}%` }),
-        );
-        const result = sanitizeResumeText(raw);
-        clean = result.clean;
-        fixes = result.fixes;
-        warnings = result.warnings;
-
-        if (clean.replace(/\s/g, "").length < 100) {
-          throw new LlmError(
-            "Too little readable text — this file is likely a scan or an empty document.",
-            null,
-            false,
+        if (!item.file.bytes || item.file.bytes.length === 0) {
+          if (item.analysis) {
+            const a = item.analysis;
+            clean = [
+              `Candidate Name: ${a.candidateName}`,
+              `Target Role: ${a.role}`,
+              `Assumed Role: ${a.assumedRole}`,
+              `Executive Summary: ${a.summary}`,
+              `Recruiter Impression: ${a.recruiterFirstImpression}`,
+              `Matched Skills: ${(a.skillMatrix?.matched || []).join(", ")}`,
+              `Missing Skills: ${(a.skillMatrix?.missing || []).join(", ")}`,
+              `Additional Skills: ${(a.skillMatrix?.additional || []).join(", ")}`,
+              `Strengths: ${(a.strengths || []).join("; ")}`,
+              `Critical Issues: ${(a.criticalIssues || []).map((ci) => `${ci.title}: ${ci.detail}`).join("; ")}`,
+              `Action Roadmap: ${(a.actionRoadmap || []).join("; ")}`,
+            ].join("\n\n");
+            patch(item.id, { cleanText: clean });
+          } else {
+            throw new LlmError("No resume text or binary available for analysis.", null, false);
+          }
+        } else {
+          patch(item.id, {
+            status: "extracting",
+            progress: 15,
+            message: "Extracting resume text…",
+            attempt,
+          });
+          raw = await extractText(item.file, (pct) =>
+            patch(item.id, { progress: 15 + pct * 0.25, message: `OCR ${pct}%` }),
           );
+          const result = sanitizeResumeText(raw);
+          clean = result.clean;
+          fixes = result.fixes;
+          warnings = result.warnings;
+
+          if (clean.replace(/\s/g, "").length < 100) {
+            throw new LlmError(
+              "Too little readable text — this file is likely a scan or an empty document.",
+              null,
+              false,
+            );
+          }
+          patch(item.id, { rawText: raw, cleanText: clean, fixes, warnings });
         }
-        patch(item.id, { rawText: raw, cleanText: clean, fixes, warnings });
       }
 
       // 2. Start optimistic live progress timer for responsive real-time feedback
@@ -303,6 +360,11 @@ function Index() {
         });
       }, 750);
 
+      const activeJd =
+        overrideJd !== undefined
+          ? (typeof overrideJd === "string" && overrideJd.trim() ? overrideJd.trim() : undefined)
+          : (useJd && jd.trim() ? jd.trim() : undefined);
+
       try {
         const raw2 = await callModel(
           {
@@ -310,7 +372,7 @@ function Index() {
             resumeText: clean,
             defaultRole: settings.defaultRole,
             companyName: settings.companyName,
-            ...(useJd && jd.trim() ? { jobDescription: jd.trim() } : {}),
+            ...(activeJd ? { jobDescription: activeJd } : {}),
           },
           settings,
           signal,
@@ -369,7 +431,8 @@ function Index() {
             id,
             fileName: item?.file.name ?? id,
             analysis,
-            ...(item?.file.bytes ? { resumeBytes: item.file.bytes } : {}),
+            cleanText: item?.cleanText,
+            rawText: item?.rawText,
           }).catch(() => {});
         },
         onError: (id, message, willRetry, retryInSec) => {
@@ -544,19 +607,157 @@ function Index() {
         },
       );
       queueRef.current = queue;
+      const targetJd = useJd && jd.trim() ? jd.trim() : undefined;
       queue.add([
         {
           id,
           run: ({ signal, attempt }) => {
             const latest = itemsRef.current.find((i) => i.id === id)!;
-            return analyzeOne(latest, signal, attempt);
+            return analyzeOne(latest, signal, attempt, targetJd);
           },
           isRetryable: (e: unknown) => (e instanceof LlmError ? e.retryable : true),
         },
       ]);
       void queue.run();
     },
-    [running, maxRetries, patch, analyzeOne],
+    [running, maxRetries, patch, analyzeOne, useJd, jd],
+  );
+
+  const deleteItem = useCallback(
+    async (id: string) => {
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      if (drawerId === id) setDrawerId(null);
+      await deleteStoredAnalysis(id);
+      toast.success("Candidate record deleted.");
+    },
+    [drawerId],
+  );
+
+  const deleteManyItems = useCallback(
+    async (ids: string[]) => {
+      if (!ids || ids.length === 0) return;
+      const idSet = new Set(ids);
+      setItems((prev) => prev.filter((i) => !idSet.has(i.id)));
+      if (drawerId && idSet.has(drawerId)) setDrawerId(null);
+      await deleteStoredAnalyses(ids);
+      toast.success(`Deleted ${ids.length} candidate records.`);
+    },
+    [drawerId],
+  );
+
+  const reanalyzeWithCurrentJd = useCallback(
+    (candidateIds?: string[]) => {
+      if (running) {
+        toast.error("Wait for the current batch to finish.");
+        return;
+      }
+      const activeJd = jd.trim();
+      if (!activeJd) {
+        toast.error("Please paste a Job Description first.");
+        return;
+      }
+      if (!useJd) {
+        setUseJd(true);
+      }
+
+      const activeM = findModel(settings.modelId);
+      const hasKey =
+        activeM.provider === "litellm" ||
+        activeM.provider === "openai-compatible" ||
+        Boolean(settings.proxyUrl.trim()) ||
+        (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
+        (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
+
+      if (!hasKey) {
+        toast.error(
+          `No API key configured in MongoDB for ${activeM.label}. Please open Admin Portal (/admin) to add your API key.`,
+        );
+        return;
+      }
+
+      const idSet = candidateIds && candidateIds.length > 0 ? new Set(candidateIds) : null;
+      const targetItems = itemsRef.current.filter((i) => !idSet || idSet.has(i.id));
+      if (!targetItems.length) {
+        toast.error("No candidates to re-evaluate.");
+        return;
+      }
+
+      setItems((prev) =>
+        prev.map((i) =>
+          !idSet || idSet.has(i.id)
+            ? { ...i, status: "queued", progress: 0, message: "Queued for JD re-evaluation…" }
+            : i,
+        ),
+      );
+
+      setRunning(true);
+      const started = new Map<string, number>();
+
+      const queue = new RateLimitedQueue<Analysis>(
+        { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(3, cooldownSec * 2) },
+        {
+          onStart: (id, attempt) => {
+            started.set(id, Date.now());
+            patch(id, { attempt, status: "analyzing" });
+          },
+          onSuccess: (id, analysis) => {
+            const prevAnalysis = itemsRef.current.find((i) => i.id === id)?.analysis;
+            const merged: Analysis = {
+              ...analysis,
+              manualScore: prevAnalysis?.manualScore ?? null,
+              officerNotes: prevAnalysis?.officerNotes ?? "",
+            };
+            patch(id, {
+              status: "done",
+              progress: 100,
+              message: "",
+              analysis: merged,
+              durationMs: Date.now() - (started.get(id) ?? Date.now()),
+            });
+            const item = itemsRef.current.find((i) => i.id === id);
+            void saveAnalysis({
+              id,
+              fileName: item?.file.name ?? id,
+              analysis: merged,
+              cleanText: item?.cleanText,
+              rawText: item?.rawText,
+            }).catch(() => {});
+          },
+          onError: (id, message, willRetry, retryInSec) => {
+            patch(id, {
+              status: willRetry ? "retrying" : "error",
+              progress: willRetry ? 50 : 100,
+              message: willRetry ? `${message} — retrying in ${retryInSec}s` : message,
+              durationMs: Date.now() - (started.get(id) ?? Date.now()),
+            });
+          },
+          onRetryWait: (id, secondsLeft) =>
+            patch(id, { message: `Rate limited — retrying in ${secondsLeft}s` }),
+          onCooldown: (secondsLeft) => setCooldownLeft(secondsLeft),
+          onIdle: () => {
+            setRunning(false);
+            setCooldownLeft(0);
+            toast.success("Job Description re-evaluation complete.");
+          },
+        },
+      );
+
+      queueRef.current = queue;
+      queue.add(
+        targetItems.map((item) => ({
+          id: item.id,
+          run: ({ signal, attempt }) => {
+            const latest = itemsRef.current.find((i) => i.id === item.id) ?? item;
+            return analyzeOne(latest, signal, attempt, activeJd);
+          },
+          isRetryable: (error: unknown) => (error instanceof LlmError ? error.retryable : true),
+        })),
+      );
+
+      void queue.run();
+      toast.info(`Started re-evaluating ${targetItems.length} candidate(s) against current JD.`);
+    },
+    [running, jd, useJd, settings, systemInfo, concurrency, cooldownSec, maxRetries, patch, analyzeOne],
   );
 
   const exportPdf = useCallback(async (id: string) => {
@@ -594,6 +795,7 @@ function Index() {
   /* ---------------------------------- view --------------------------------- */
 
   const activeModel = findModel(settings.modelId);
+  const hasActiveJd = Boolean(useJd && jd.trim());
 
   return (
     <main className="min-h-screen bg-background text-foreground pb-16">
@@ -663,7 +865,18 @@ function Index() {
               onRun: runBatch,
               onStop: stop,
               onRetry: retryFailed,
-              onClear: () => setItems([]),
+              onClear: async () => {
+                if (confirm("Clear all loaded and analyzed candidates?")) {
+                  setItems([]);
+                  await clearAnalyses();
+                  toast.success("All candidate records cleared.");
+                }
+              },
+              onDelete: deleteItem,
+              onDeleteMany: deleteManyItems,
+              onReevaluate: (id) => reanalyzeWithCurrentJd([id]),
+              onReevaluateMany: (ids) => reanalyzeWithCurrentJd(ids),
+              onReevaluateAllJd: () => reanalyzeWithCurrentJd(),
               onExportCsv: doExportCsv,
               onExportMd: () =>
                 exportBatchMarkdown(
@@ -697,7 +910,13 @@ function Index() {
                 shortlist and compare at a glance.
               </p>
             </div>
-            <Leaderboard rows={stats.doneRows} onOpen={setDrawerId} />
+            <Leaderboard
+              rows={stats.doneRows}
+              onOpen={setDrawerId}
+              onDelete={deleteItem}
+              onReevaluate={(id) => reanalyzeWithCurrentJd([id])}
+              hasActiveJd={hasActiveJd}
+            />
           </section>
         )}
       </div>
@@ -709,6 +928,9 @@ function Index() {
         onApply={applyRectify}
         onReanalyze={reanalyzeOne}
         onExportPdf={(id) => void exportPdf(id)}
+        onDelete={deleteItem}
+        hasActiveJd={hasActiveJd}
+        onReanalyzeWithJd={(id) => reanalyzeWithCurrentJd([id])}
       />
     </main>
   );
@@ -774,6 +996,11 @@ function AnalyzeView({
     onStop: () => void;
     onRetry: () => void;
     onClear: () => void;
+    onDelete?: (id: string) => void;
+    onDeleteMany?: (ids: string[]) => void;
+    onReevaluate?: (id: string) => void;
+    onReevaluateMany?: (ids: string[]) => void;
+    onReevaluateAllJd?: () => void;
     onExportCsv: () => void;
     onExportMd: () => void;
     onOpen: (id: string) => void;
@@ -879,12 +1106,33 @@ function AnalyzeView({
               </div>
 
               {control.useJd && (
-                <Textarea
-                  value={control.jd}
-                  onChange={(e) => control.setJd(e.target.value)}
-                  placeholder="Paste the full job description or key requirements here…"
-                  className="min-h-28 text-xs leading-relaxed rounded-lg"
-                />
+                <div className="space-y-2.5">
+                  <Textarea
+                    value={control.jd}
+                    onChange={(e) => control.setJd(e.target.value)}
+                    placeholder="Paste the full job description or key requirements here…"
+                    className="min-h-28 text-xs leading-relaxed rounded-lg"
+                  />
+                  {control.jd.trim() && items.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <span className="text-[11px] text-muted-foreground">
+                        Ready to re-evaluate {items.length} candidate{items.length > 1 ? "s" : ""} against this JD
+                      </span>
+                      {handlers.onReevaluateAllJd && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={handlers.onReevaluateAllJd}
+                          disabled={running}
+                          className="h-7 text-xs font-semibold rounded-lg shadow-sm"
+                        >
+                          <Sparkles className="size-3.5 mr-1.5" />
+                          Re-evaluate All with Current JD
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1121,6 +1369,11 @@ function AnalyzeView({
             rows={stats.doneRows}
             onOpen={handlers.onOpen}
             onExportPdf={handlers.onExportPdf}
+            onDelete={handlers.onDelete}
+            onDeleteMany={handlers.onDeleteMany}
+            onReevaluate={handlers.onReevaluate}
+            onReevaluateMany={handlers.onReevaluateMany}
+            hasActiveJd={Boolean(control.useJd && control.jd.trim())}
           />
         </section>
       )}

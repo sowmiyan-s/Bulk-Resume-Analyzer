@@ -6,7 +6,13 @@
  */
 
 import type { Analysis } from "./analysis-types";
-import { saveAnalysisMongoFn, loadAnalysesMongoFn, clearAnalysesMongoFn } from "./database.server";
+import {
+  saveAnalysisMongoFn,
+  loadAnalysesMongoFn,
+  clearAnalysesMongoFn,
+  deleteAnalysisMongoFn,
+  deleteManyAnalysesMongoFn,
+} from "./database.server";
 
 export type StoredAnalysis = {
   id: string;
@@ -19,6 +25,8 @@ export type StoredAnalysis = {
   assumed_role: string;
   jd_score: number | null;
   created_at: string;
+  clean_text?: string;
+  raw_text?: string;
   analysis: Analysis;
 };
 
@@ -54,6 +62,8 @@ export async function saveAnalysis(input: {
   id: string;
   fileName: string;
   analysis: Analysis;
+  cleanText?: string;
+  rawText?: string;
 }): Promise<StoredAnalysis> {
   const row: StoredAnalysis = {
     id: input.id,
@@ -66,6 +76,8 @@ export async function saveAnalysis(input: {
     assumed_role: input.analysis.assumedRole,
     jd_score: input.analysis.jdScore,
     created_at: new Date().toISOString(),
+    clean_text: input.cleanText || "",
+    raw_text: input.rawText || "",
     analysis: input.analysis,
   };
 
@@ -81,6 +93,8 @@ export async function saveAnalysis(input: {
         id: input.id,
         fileName: input.fileName,
         analysis: input.analysis,
+        cleanText: input.cleanText,
+        rawText: input.rawText,
       },
     }).catch((err) => {
       console.warn("[storage] MongoDB save failed:", err);
@@ -99,7 +113,7 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
     if (res && res.success && Array.isArray(res.items) && res.items.length > 0) {
       // Merge with any local records
       const local = readLocal().filter((l) => !res.items.some((r) => r.id === l.id));
-      const combined = [...res.items, ...local];
+      const combined = [...(res.items as StoredAnalysis[]), ...local];
       writeLocal(combined);
       return combined;
     }
@@ -108,6 +122,38 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
   }
 
   return readLocal().slice().reverse();
+}
+
+/** Delete a single stored analysis by ID from both localStorage and MongoDB Atlas. */
+export async function deleteStoredAnalysis(id: string): Promise<void> {
+  const all = readLocal();
+  const next = all.filter((r) => r.id !== id);
+  writeLocal(next);
+
+  try {
+    void deleteAnalysisMongoFn({ data: { id } }).catch((err) => {
+      console.warn("[storage] MongoDB delete failed:", err);
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Delete multiple stored analyses by IDs from both localStorage and MongoDB Atlas. */
+export async function deleteStoredAnalyses(ids: string[]): Promise<void> {
+  if (!ids || ids.length === 0) return;
+  const idSet = new Set(ids);
+  const all = readLocal();
+  const next = all.filter((r) => !idSet.has(r.id));
+  writeLocal(next);
+
+  try {
+    void deleteManyAnalysesMongoFn({ data: { ids } }).catch((err) => {
+      console.warn("[storage] MongoDB deleteMany failed:", err);
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Clear all stored analyses from MongoDB and localStorage. */

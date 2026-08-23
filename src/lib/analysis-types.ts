@@ -244,9 +244,6 @@ function toRelevance(
 
 export function normalizeAnalysis(raw: unknown): Analysis {
   const o = (raw ?? {}) as Record<string, unknown>;
-
-  const overallScore = clamp(num(pick(o, "overall_score", "overallScore", "atsScore", "score")));
-
   const matrixRaw = (pick(o, "skill_matrix", "skillMatrix") ?? {}) as Record<string, unknown>;
   const jdRaw = (pick(o, "jd_match", "jdMatch") ?? {}) as Record<string, unknown>;
   const rawJdScore = pick(jdRaw, "score") ?? pick(o, "jd_score", "jdScore");
@@ -264,6 +261,15 @@ export function normalizeAnalysis(raw: unknown): Analysis {
       note: str(pick(row, "note", "comment", "reason")),
     };
   });
+
+  const sumBreakdown = breakdown.length >= 3 ? breakdown.reduce((acc, b) => acc + b.score, 0) : 0;
+  const rawOverall = num(pick(o, "overall_score", "overallScore", "atsScore", "score"));
+  const overallScore =
+    rawOverall > 0
+      ? clamp(rawOverall)
+      : sumBreakdown > 0
+        ? clamp(sumBreakdown)
+        : 75;
 
   // When a JD is supplied the framing is company-fit; otherwise we fall back to
   // the role the model inferred (or the officer-supplied default role).

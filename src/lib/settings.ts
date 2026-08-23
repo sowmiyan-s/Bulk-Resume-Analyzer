@@ -16,12 +16,15 @@ export function loadSettings(): LlmSettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
+      modelId: (typeof parsed.modelId === "string" && parsed.modelId.trim()) || DEFAULT_SETTINGS.modelId,
       temperature: Number.isFinite(parsed.temperature)
         ? Number(parsed.temperature)
         : DEFAULT_SETTINGS.temperature,
       maxTokens: Number.isFinite(parsed.maxTokens)
         ? Number(parsed.maxTokens)
         : DEFAULT_SETTINGS.maxTokens,
+      customBaseUrl: typeof parsed.customBaseUrl === "string" ? parsed.customBaseUrl : DEFAULT_SETTINGS.customBaseUrl,
+      proxyUrl: typeof parsed.proxyUrl === "string" ? parsed.proxyUrl : DEFAULT_SETTINGS.proxyUrl,
     };
   } catch {
     return DEFAULT_SETTINGS;

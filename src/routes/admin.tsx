@@ -31,15 +31,26 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   getAdminSettingsFn,
   saveAdminSettingsFn,
   verifyAdminPassFn,
   clearAnalysesMongoFn,
   loadAnalysesMongoFn,
+  deleteAnalysisMongoFn,
   testApiKeyFn,
   type StoredMongoAnalysis,
 } from "@/lib/database.server";
 import { effectiveScore, tierTone } from "@/lib/analysis-types";
+import { modelsByProvider, PROVIDER_LABEL, type ProviderId } from "@/lib/models";
 import { exportCsv } from "@/lib/report";
 
 export const Route = createFileRoute("/admin")({
@@ -65,6 +76,7 @@ function AdminPage() {
   const [geminiKey, setGeminiKey] = useState("");
   const [defaultRole, setDefaultRole] = useState("Software Engineer (Entry Level)");
   const [companyName, setCompanyName] = useState("the hiring company");
+  const [defaultModelId, setDefaultModelId] = useState("meta/llama-3.3-70b-instruct");
   const [showKey, setShowKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingNvidia, setTestingNvidia] = useState(false);
@@ -87,6 +99,9 @@ function AdminPage() {
         setGeminiKey(res.settings.geminiApiKey || "");
         setDefaultRole(res.settings.defaultRole || "Software Engineer (Entry Level)");
         setCompanyName(res.settings.companyName || "the hiring company");
+        if (res.settings.defaultModelId) {
+          setDefaultModelId(res.settings.defaultModelId);
+        }
         if (res.stats?.mongoPing) {
           setMongoStatus(res.stats.mongoPing);
         }
@@ -145,6 +160,7 @@ function AdminPage() {
             geminiApiKey: geminiKey,
             defaultRole,
             companyName,
+            defaultModelId,
           },
         },
       });
@@ -209,6 +225,23 @@ function AdminPage() {
       toast.error(`Test failed: ${msg}`);
     } finally {
       setTestingGemini(false);
+    }
+  };
+
+  const handleDeleteOne = async (id: string, name: string) => {
+    if (!window.confirm(`Delete record for candidate "${name}" from MongoDB Atlas?`)) {
+      return;
+    }
+    try {
+      const res = await deleteAnalysisMongoFn({ data: { id } });
+      if (res.success) {
+        setAnalyses((prev) => prev.filter((a) => a.id !== id));
+        toast.success(`Deleted record for ${name}.`);
+      } else {
+        toast.error(res.error || "Failed to delete record.");
+      }
+    } catch {
+      toast.error("Failed to delete record.");
     }
   };
 
@@ -499,7 +532,36 @@ function AdminPage() {
             </div>
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2 pt-2 border-t border-border/60">
+          <div className="grid gap-5 sm:grid-cols-3 pt-2 border-t border-border/60">
+            <div className="space-y-2">
+              <Label htmlFor="def-model" className="text-xs">
+                Default Screening Model (MongoDB)
+              </Label>
+              <Select value={defaultModelId} onValueChange={setDefaultModelId}>
+                <SelectTrigger id="def-model" className="text-xs">
+                  <SelectValue placeholder="Select default model" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {(Object.keys(modelsByProvider()) as ProviderId[]).map((prov) => {
+                    const list = modelsByProvider()[prov];
+                    if (!list.length) return null;
+                    return (
+                      <SelectGroup key={prov}>
+                        <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          {PROVIDER_LABEL[prov]}
+                        </SelectLabel>
+                        {list.map((m) => (
+                          <SelectItem key={m.id} value={m.id} className="text-xs">
+                            {m.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="def-role" className="text-xs">
                 Default Screening Role (No JD)
@@ -596,13 +658,14 @@ function AdminPage() {
                   <TableHead className="text-xs font-bold">Score</TableHead>
                   <TableHead className="text-xs font-bold">Readiness Tier</TableHead>
                   <TableHead className="text-xs font-bold">Evaluated Date</TableHead>
+                  <TableHead className="text-xs font-bold text-right w-16">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAnalyses.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={5}
+                      colSpan={6}
                       className="py-8 text-center text-xs text-muted-foreground"
                     >
                       No candidate records found in MongoDB Atlas.
@@ -633,6 +696,18 @@ function AdminPage() {
                       </TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground">
                         {new Date(item.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => void handleDeleteOne(item.id, item.candidate_name)}
+                          title={`Delete record for ${item.candidate_name}`}
+                          aria-label={`Delete record for ${item.candidate_name}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

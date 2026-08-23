@@ -70,10 +70,9 @@ export class LlmError extends Error {
 /* ------------------------------- prompting ------------------------------- */
 
 const SYSTEM_PROMPT =
-  "You are a perceptive, experienced technical hiring manager and placement dean. " +
-  "Evaluate each candidate based on genuine engineering competence, technical depth, and practical problem solving. " +
-  "Do not rely on cookie-cutter AI assumptions. Differentiate clearly between exceptional builders, capable students, and weak profiles based on real project substance. " +
-  "Be concise, direct, and quote exact substrings from the resume. " +
+  "You are a seasoned Principal Engineering Director and Technical Hiring Leader with 15+ years of screening software and tech candidates. " +
+  "Evaluate each candidate based on genuine engineering competence, technical architecture depth, problem solving, and real project implementation. " +
+  "CRITICAL: Never invent dummy mistakes, fake typos, or manufactured flaws. Be deeply analytical, realistic, fair, and quote exact text from the resume. " +
   "Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
 
 /** Compact key list. Deliberately no sample JSON — that alone saves ~400 input tokens. */
@@ -82,40 +81,40 @@ candidate_name:string (from resume, else "Unnamed candidate")
 role:string (the target role you infer from the resume)
 assumed_role:string (the role you evaluated against — equals role when no JD was given, else the JD role)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
-overall_score:int 0-100 (real campus shortlisting odds; differentiate strictly from 30 to 95)
+overall_score:int 0-100 (realistic hiring shortlisting score based on real technical substance; calibrate accurately between 30 and 95)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
 score_breakdown:[{category:"Technical Depth & Stack"|"Project Scope & Problem Solving"|"Practical Impact & Experience"|"Structure & ATS Parseability"|"Language & Polish",score:int,max:int,note:string}] exactly 5 rows with maxes: 25, 25, 20, 15, 15 (sum to 100)
-recruiter_first_impression:string (<=35 words: blunt 6-second scan reaction)
-hr_verdict:string (<=45 words: clear shortlist or reject reasons)
-strengths:[string] max 3 (concrete verified technical capabilities)
-critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 3-5 items, evidence must quote the resume verbatim
-grammar_and_ocr_errors:[string] max 5, format "wrong -> correct"
-formatting_problems:[string] max 3 (ATS parseability)
-skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each}
-bullet_rewrites:[{original,rewritten,reason}] 3 items. Rewritten bullets must be clear, human, and impactful (Action Verb + Tech / Architecture + Outcome). Include numbers ONLY when genuine or realistic; NEVER insert fake placeholders like "[X]%".
-tech_improvement_ideas:[string] max 4 (concrete tools/tech to master)
-project_suggestions:[string] max 2 (concrete fixes for biggest skill gaps)
+recruiter_first_impression:string (<=35 words: realistic hiring manager scan reaction based on real substance)
+hr_verdict:string (<=45 words: clear shortlist or reject reasons based on demonstrable skills)
+strengths:[string] max 3 (genuine, verified technical competencies found in their projects/experience)
+critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 0-4 items. ONLY real, verified weaknesses (e.g. vague project descriptions lacking technical tools, missing links, unbacked claims). Return [] if no serious issues exist. NEVER fabricate flaws.
+grammar_and_ocr_errors:[string] 0-3 items. ONLY genuine typos or OCR character glitches (format: "wrong -> correct"). Return [] if clean.
+formatting_problems:[string] 0-3 items. ONLY genuine ATS parsing flaws (e.g. multi-column tables, unparseable dates). Return [] if clean.
+skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (accurately categorize based on evidence in the resume)
+bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate real weak bullet points using: Strong Action Verb + Technical Tools / Architecture + Measurable Outcome. NEVER insert fake placeholders like "[X]%".
+tech_improvement_ideas:[string] max 4 (concrete high-value modern technologies/tools that would genuinely strengthen their profile)
+project_suggestions:[string] max 2 (concrete engineering project ideas with clear architecture that solve their biggest skill gaps)
 structure:{score:int 0-100,label:string ("Excellent"|"Good"|"Needs work"|"Poor"),notes:[string] max 3}
-data_gaps:[{area,missing,impact}] max 4 (missing links, tech details, etc.)
+data_gaps:[{area,missing,impact}] max 3 (missing GitHub/live demo links, missing stack details)
 relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}`;
 
-const RULES = `Scoring Rubric & Genuine Assessment:
-- Differentiate sharply based on technical substance! Avoid clustered middle scores (e.g. 70-75).
-- Tier 1 (85-100): Exceptional candidate. Shows deep technical competence, non-trivial projects (fullstack, distributed systems, algorithms, APIs, dev tools), genuine architecture depth, clean formatting.
-- Tier 2 (60-84): Average to solid candidate. Good fundamentals and working projects, but bullets may be passive, tech stack is basic academic coursework, or minor ATS flaws exist.
-- Tier 3 (30-59): High risk. Superficial buzzword lists with no demonstrable project backing, missing core CS skills, or major format/OCR flaws.
-- DO NOT force artificial metrics or fake percentages onto every project. Technical depth, architectural complexity, and problem solving are what truly matter. Quantify metrics ONLY when naturally relevant.
-- score_breakdown must use maxes [25, 25, 20, 15, 15] for the 5 categories.
-- evidence must be an exact verbatim quote from the resume.
+const RULES = `Professional Evaluation & Scoring Standards:
+1. STRICT AUTHENTICITY — NO DUMMY MISTAKES:
+   - Do NOT invent fake errors, trivial nitpicks, or imaginary typos to fill quotas.
+   - If grammar and formatting are clean, return empty arrays [] for grammar_and_ocr_errors and formatting_problems.
+   - If the candidate shows strong skills and relevant projects, give them high marks and praise real architecture.
+   - Evidence quotes MUST be verbatim excerpts from the resume.
 
-Actionable Quality Guidelines (NO GENERIC FILLER):
-- NEVER output generic placeholder text like "wrong -> correct", "None", "no error", "Some formatting issues", or "Develop a full-stack web application".
-- grammar_and_ocr_errors: ONLY real typos/OCR mistakes found in text (format: "typo -> correct"). If none found, return [].
-- formatting_problems: Concrete ATS issues (e.g. "Two-column table format fails standard ATS parsers", "Missing explicit date ranges on experience"). If none, return [].
-- tech_improvement_ideas: High-impact specific tools/concepts (e.g. "PostgreSQL with query indexing & migrations", "Docker containerization & GitHub Actions CI/CD", "Redis for in-memory caching").
-- project_suggestions: Specific architectural blueprints that fix their specific gaps (e.g. "Build a distributed rate-limited API gateway with JWT auth, Redis, and unit tests").
-- strengths: Genuine, verified capabilities found on the resume (e.g. "Architected multi-agent FastAPI backend", "Published NPM package with 100+ downloads").
-- Keep all strings tight, terse, and student-improving.`;
+2. TECHNICAL RIGOR & ACCURATE ATS SCORING:
+   - If a resume has clean ATS formatting, clear standard sections (Experience, Projects, Education, Skills), modern tech stacks, and demonstrable project work, score it accurately in the high tier (80-98), consistent with leading industry ATS benchmarks.
+   - Tier 1 (82-98): Shortlist Ready. Strong technical foundation, non-trivial fullstack/backend/systems projects, clean ATS structure, demonstrable problem solving.
+   - Tier 2 (68-81): Needs Minor Polish. Solid coursework and working projects; may lack production deployment or could strengthen bullet phrasing.
+   - Tier 3 (35-67): Needs Overhaul. ONLY for resumes with zero technical substance, broken OCR text, or severe mismatch with software/tech roles.
+   - DO NOT artificially lower the score of well-qualified candidates.
+
+3. REWRITES & SUGGESTIONS:
+   - Bullet rewrites must read like top-tier software engineers' resumes without fabricated metrics.
+   - Project suggestions must provide specific architectural concepts (e.g., "Build an asynchronous document processing pipeline with FastAPI, Celery, Redis queue, and Docker").`;
 
 export function buildMessages(input: {
   fileName: string;
@@ -132,11 +131,11 @@ export function buildMessages(input: {
     ? `TARGET JOB DESCRIPTION (you are acting as the hiring manager for ${company}):
 ${capForPrompt(jd, 2200)}
 
-You MUST judge this resume strictly as a candidate for THAT role at ${company}. Be blunt about fit.
-Also add: jd_score:int 0-100 (fit against this JD) and jd_verdict:string (<=35 words, why they would or would not get an interview). Compute skill_matrix strictly against this JD. Set relevance.evaluation_basis to "jd-fit".`
+You MUST judge this resume strictly as a candidate for THAT role at ${company}. Be honest, fair, and thorough about genuine fit.
+Also add: jd_score:int 0-100 (fit against this JD) and jd_verdict:string (<=35 words, why they would or would not get an interview based on demonstrated skills). Compute skill_matrix strictly against this JD. Set relevance.evaluation_basis to "jd-fit".`
     : `NO job description was supplied. Evaluate this resume against the DEFAULT role below and judge campus-placement readiness for that kind of role.
 DEFAULT ROLE: ${defaultRole}
-Set evaluation_basis to "role-fit". Set assumed_role to the role you are judging against (use "${defaultRole}" unless the resume clearly targets a different one). In relevance.verdict, say plainly whether the resume's actual skills and projects line up with that role, and flag it if the skills listed look unrelated to the experience shown.`;
+Set evaluation_basis to "role-fit". Set assumed_role to the role you are judging against (use "${defaultRole}" unless the resume clearly targets a different one). In relevance.verdict, assess whether their demonstrable technical skills and projects match this role.`;
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
