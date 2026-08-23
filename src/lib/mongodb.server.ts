@@ -4,12 +4,23 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
+const FALLBACK_URI =
+  "mongodb+srv://sowmiyan:Sowmiyan321@cluster0.er22sa5.mongodb.net/resume_radiance?retryWrites=true&w=majority";
+
+function isValidMongoUri(uri?: string | null): boolean {
+  if (!uri || typeof uri !== "string") return false;
+  const trimmed = uri.trim();
+  return trimmed.startsWith("mongodb://") || trimmed.startsWith("mongodb+srv://");
+}
+
 function getMongoUri(): string {
   if (typeof process !== "undefined" && process.env) {
-    if (process.env["MONGODB_URI"]) return process.env["MONGODB_URI"];
-    if (process.env["VITE_MONGODB_URI"]) return process.env["VITE_MONGODB_URI"];
+    const rawUri = process.env["MONGODB_URI"] || process.env["VITE_MONGODB_URI"];
+    if (isValidMongoUri(rawUri)) {
+      return rawUri!.trim();
+    }
   }
-  return "mongodb://localhost:27017/resume_radiance";
+  return FALLBACK_URI;
 }
 
 let clientInstance: MongoClient | null = null;
