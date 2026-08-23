@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 export interface ProxyLlmPayload {
   provider: "nvidia" | "gemini" | "litellm" | "openai-compatible";
   modelId: string;
-  apiKey: string;
+  apiKey?: string;
   targetUrl?: string;
   customBaseUrl?: string;
   messages: Array<{ role: "system" | "user"; content: string }>;
@@ -29,37 +29,46 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
 
     let effectiveKey = apiKey?.trim();
 
-    if (!effectiveKey && typeof process !== "undefined") {
-      effectiveKey =
-        (provider === "gemini"
-          ? process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"]
-          : provider === "litellm"
-            ? process.env["LITELLM_API_KEY"] || "sk-litellm"
-            : process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"]) || "";
-    }
-
+    // 1. Retrieve API key exclusively from MongoDB Atlas System Vault
     if (!effectiveKey) {
       try {
         const { getDb } = await import("./mongodb.server");
         const db = await getDb();
         const config = await db.collection("system_settings").findOne({ key: "global_config" });
         if (config) {
-          if (provider === "nvidia" && typeof config["nvidiaApiKey"] === "string") {
+          if (provider === "nvidia" && typeof config["nvidiaApiKey"] === "string" && config["nvidiaApiKey"].trim()) {
             effectiveKey = config["nvidiaApiKey"].trim();
-          } else if (provider === "gemini" && typeof config["geminiApiKey"] === "string") {
+          } else if (provider === "gemini" && typeof config["geminiApiKey"] === "string" && config["geminiApiKey"].trim()) {
             effectiveKey = config["geminiApiKey"].trim();
           }
         }
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn("[llm-proxy] Could not query MongoDB system_settings:", e);
       }
+    }
+
+    // 2. Fallback to process.env if available
+    if (!effectiveKey && typeof process !== "undefined" && process.env) {
+      if (provider === "gemini") {
+        effectiveKey = (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim();
+      } else if (provider === "litellm") {
+        effectiveKey = (process.env["LITELLM_API_KEY"] || "sk-litellm")?.trim();
+      } else {
+        effectiveKey = (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])?.trim();
+      }
+    }
+
+    if (provider === "litellm" && !effectiveKey) {
+      effectiveKey = "sk-litellm";
     }
 
     if (!effectiveKey && provider !== "litellm" && provider !== "openai-compatible") {
       throw new Error(
-        `No API key provided for '${provider}'. Please add your API key in the AI Engine Settings or Admin Panel (/admin).`,
+        `No API key configured in MongoDB for '${provider}'. Please log in to the Admin Panel (/admin) to configure and save your API key.`,
       );
     }
+
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     if (provider === "gemini") {
       const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
@@ -69,29 +78,45 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
         .map((m) => m.content)
         .join("\n\n");
 
-      const res = await fetch(geminiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": effectiveKey,
-        },
-        body: JSON.stringify({
-          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-          contents: [{ role: "user", parts: [{ text: user }] }],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: maxTokens,
-            responseMimeType: "application/json",
+      let lastErrText = "";
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const res = await fetch(geminiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": effectiveKey ?? "",
           },
-        }),
-      });
+          body: JSON.stringify({
+            ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+            contents: [{ role: "user", parts: [{ text: user }] }],
+            generationConfig: {
+              temperature,
+              maxOutputTokens: maxTokens,
+              responseMimeType: "application/json",
+            },
+          }),
+        });
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`Gemini API error (${res.status}): ${errText}`);
+        if (res.ok) {
+          return await res.json();
+        }
+
+        lastErrText = await res.text().catch(() => "");
+        if ((res.status === 429 || res.status === 503) && attempt < 3) {
+          // Automatic exponential backoff: 3s, 6s
+          await sleep(attempt * 3000);
+          continue;
+        }
+
+        let parsedMsg = lastErrText;
+        try {
+          const j = JSON.parse(lastErrText);
+          parsedMsg = j?.error?.message ?? lastErrText;
+        } catch {
+          /* raw text */
+        }
+        throw new Error(`Gemini API error (${res.status}): ${parsedMsg}`);
       }
-
-      return await res.json();
     }
 
     // Default: NVIDIA NIM, LiteLLM & OpenAI-compatible
@@ -122,18 +147,23 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       ...(isDeepSeek ? { chat_template_kwargs: { thinking: false } } : {}),
     };
 
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${effectiveKey}`,
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(35000),
-    });
+    let lastErr = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${effectiveKey}`,
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(35000),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        return await res.json();
+      }
+
       const errText = await res.text().catch(() => "");
       let parsedErr = errText;
       try {
@@ -142,8 +172,16 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       } catch {
         // Leave parsedErr as raw errText if JSON parsing fails
       }
+      lastErr = parsedErr;
+
+      if ((res.status === 429 || res.status === 503) && attempt < 3) {
+        // Automatic exponential backoff for rate limits: 3s, 6s
+        await sleep(attempt * 3000);
+        continue;
+      }
+
       throw new Error(`API error (${res.status}): ${parsedErr}`);
     }
 
-    return await res.json();
+    throw new Error(`API error: ${lastErr}`);
   });

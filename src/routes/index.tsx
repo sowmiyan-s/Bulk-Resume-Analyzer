@@ -31,6 +31,7 @@ import { LlmError, callModel, DEFAULT_SETTINGS, type LlmSettings } from "@/lib/l
 import { findModel } from "@/lib/models";
 import { RateLimitedQueue } from "@/lib/queue";
 import { saveAnalysis, loadAnalyses, clearAnalyses, type StoredAnalysis } from "@/lib/storage";
+import { getPublicSystemInfoFn } from "@/lib/database.server";
 import { exportBatchMarkdown, exportCsv, exportScorecardPdf } from "@/lib/report";
 import { sanitizeResumeText, type TextFix } from "@/lib/sanitize";
 import { loadSettings, saveSettings } from "@/lib/settings";
@@ -69,27 +70,57 @@ type QueueItem = {
   durationMs: number | null;
 };
 
+export type SystemInfo = {
+  hasServerNvidiaKey: boolean;
+  hasServerGeminiKey: boolean;
+  defaultRole: string;
+  companyName: string;
+  databaseConnected?: boolean;
+};
+
 function Index() {
   // NOTE: this app is server-rendered, so localStorage is unavailable on the
   // first render. Start from defaults and hydrate settings in an effect —
   // otherwise the stored API key is invisible to the client after hydration.
   const [settings, setSettings] = useState<LlmSettings>(DEFAULT_SETTINGS);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo>({
+    hasServerNvidiaKey: false,
+    hasServerGeminiKey: false,
+    defaultRole: "Software Engineer (Entry Level)",
+    companyName: "the hiring company",
+    databaseConnected: true,
+  });
   const [items, setItems] = useState<QueueItem[]>([]);
   const [tab, setTab] = useState<"analyze" | "leaderboard">("analyze");
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
-  const [cooldownSec, setCooldownSec] = useState(0);
+  const [cooldownSec, setCooldownSec] = useState(1);
   const [concurrency, setConcurrency] = useState(2);
-  const [maxRetries, setMaxRetries] = useState(2);
+  const [maxRetries, setMaxRetries] = useState(3);
   const [running, setRunning] = useState(false);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const queueRef = useRef<RateLimitedQueue<Analysis> | null>(null);
 
-  // Hydrate settings and cloud database analyses on mount
+  const refreshSystemInfo = useCallback(async () => {
+    try {
+      const info = await getPublicSystemInfoFn();
+      if (info) {
+        setSystemInfo(info);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Hydrate settings, cloud database analyses, and MongoDB public system info on mount
   useEffect(() => {
-    setSettings(loadSettings());
+    const loaded = loadSettings();
+    setSettings(loaded);
+
+    void refreshSystemInfo();
+
     void loadAnalyses()
       .then((saved) => {
         if (saved && Array.isArray(saved) && saved.length > 0) {
@@ -124,7 +155,7 @@ function Index() {
       .catch((err) => {
         console.warn("[storage] Stored analysis hydration failed:", err);
       });
-  }, []);
+  }, [refreshSystemInfo]);
 
   const patch = useCallback((id: string, next: Partial<QueueItem>) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...next } : it)));
@@ -294,8 +325,18 @@ function Index() {
   );
 
   const runBatch = useCallback(() => {
-    if (!settings.apiKey.trim()) {
-      toast.error("Open “Model & API” and add your API key first.");
+    const activeM = findModel(settings.modelId);
+    const hasKey =
+      activeM.provider === "litellm" ||
+      activeM.provider === "openai-compatible" ||
+      Boolean(settings.proxyUrl.trim()) ||
+      (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
+      (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
+
+    if (!hasKey) {
+      toast.error(
+        `No API key configured in MongoDB for ${activeM.label}. Please open the Admin Portal (/admin) to add your API key.`,
+      );
       return;
     }
 
@@ -309,7 +350,7 @@ function Index() {
     const started = new Map<string, number>();
 
     const queue = new RateLimitedQueue<Analysis>(
-      { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(2, cooldownSec) },
+      { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(3, cooldownSec * 2) },
       {
         onStart: (id, attempt) => {
           started.set(id, Date.now());
@@ -598,7 +639,12 @@ function Index() {
             >
               <Shield className="size-3.5 text-primary" /> Admin
             </Link>
-            <SettingsDialog settings={settings} onSave={persist} />
+            <SettingsDialog
+              settings={settings}
+              systemInfo={systemInfo}
+              onRefreshSystem={refreshSystemInfo}
+              onSave={persist}
+            />
           </div>
         </div>
       </header>

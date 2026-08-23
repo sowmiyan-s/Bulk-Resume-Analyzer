@@ -119,6 +119,38 @@ export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(asy
   }
 });
 
+/** Delete a single analysis record from MongoDB Atlas */
+export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { id: string }) => data)
+  .handler(async ({ data }) => {
+    try {
+      const db = await getDb();
+      const col = db.collection("analyses");
+      await col.deleteOne({ id: data.id });
+      return { success: true, message: "Record deleted from MongoDB." };
+    } catch (err) {
+      console.error("[MongoDB] Failed to delete analysis:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  });
+
+/** Delete multiple analysis records from MongoDB Atlas */
+export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { ids: string[] }) => data)
+  .handler(async ({ data }) => {
+    try {
+      const db = await getDb();
+      const col = db.collection("analyses");
+      await col.deleteMany({ id: { $in: data.ids } });
+      return { success: true, message: `Deleted ${data.ids.length} records from MongoDB.` };
+    } catch (err) {
+      console.error("[MongoDB] Failed to delete analyses:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  });
+
 /** Clear all analysis records from MongoDB Atlas */
 export const clearAnalysesMongoFn = createServerFn({ method: "POST" })
   .validator((data: { adminPass?: string }) => data)
@@ -176,7 +208,7 @@ export const saveAdminSettingsFn = createServerFn({ method: "POST" })
 
       await col.updateOne({ key: "global_config" }, { $set: updateData }, { upsert: true });
 
-      return { success: true, message: "Admin system settings updated successfully." };
+      return { success: true, message: "API keys & system settings successfully saved in MongoDB Atlas." };
     } catch (err) {
       console.error("[MongoDB] Failed to save admin settings:", err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -197,14 +229,28 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       const col = db.collection("system_settings");
       const config = await col.findOne({ key: "global_config" });
 
-      const count = await db.collection("analyses").countDocuments();
+      const count = await db.collection("analyses").countDocuments().catch(() => 0);
       const ping = await pingMongo();
+
+      const nvidiaKey =
+        (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
+        "";
+
+      const geminiKey =
+        (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
+        "";
 
       return {
         success: true,
         settings: {
-          nvidiaApiKey: (config?.["nvidiaApiKey"] as string | undefined) || "",
-          geminiApiKey: (config?.["geminiApiKey"] as string | undefined) || "",
+          nvidiaApiKey: nvidiaKey,
+          geminiApiKey: geminiKey,
           defaultRole:
             (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
           companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
@@ -235,6 +281,97 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
     }
   });
 
+/** Test an API Key against the provider */
+export const testApiKeyFn = createServerFn({ method: "POST" })
+  .validator((data: { provider: "nvidia" | "gemini"; apiKey?: string }) => data)
+  .handler(async ({ data }) => {
+    let key = data.apiKey?.trim();
+    if (!key || key === "trigger-database-vault-test") {
+      try {
+        const db = await getDb();
+        const col = db.collection("system_settings");
+        const config = await col.findOne({ key: "global_config" });
+        if (data.provider === "gemini") {
+          key =
+            (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
+            "";
+        } else {
+          key =
+            (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
+            "";
+        }
+      } catch (e) {
+        return { success: false, message: `Could not connect to MongoDB: ${String(e)}` };
+      }
+    }
+
+    if (!key) {
+      return {
+        success: false,
+        message: `No API key configured in MongoDB Vault for ${data.provider === "gemini" ? "Google Gemini" : "NVIDIA NIM"}. Please add it in Admin Panel (/admin).`,
+      };
+    }
+
+    if (data.provider === "gemini") {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "ping" }] }],
+            generationConfig: { maxOutputTokens: 5 },
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (res.ok) {
+          return { success: true, message: "Google Gemini API key is valid and working!" };
+        }
+        const errText = await res.text().catch(() => "");
+        return { success: false, message: `Gemini API check failed (${res.status}): ${errText}` };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { success: false, message: `Gemini connection failed: ${msg}` };
+      }
+    }
+
+    // Default: NVIDIA
+    try {
+      const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: "meta/llama-3.3-70b-instruct",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.ok) {
+        return { success: true, message: "NVIDIA NIM API key is valid and working!" };
+      }
+      const errText = await res.text().catch(() => "");
+      return { success: false, message: `NVIDIA API check failed (${res.status}): ${errText}` };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, message: `NVIDIA connection failed: ${msg}` };
+    }
+  });
+
 /** Get Public System Info (Safe for all users without exposing API keys) */
 export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(async () => {
   try {
@@ -246,29 +383,44 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
       (typeof process !== "undefined" &&
         process.env &&
-        (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])),
+        ((process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])?.trim())),
     );
 
     const hasServerGeminiKey = Boolean(
       (config?.["geminiApiKey"] as string | undefined)?.trim() ||
       (typeof process !== "undefined" &&
         process.env &&
-        (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])),
+        ((process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim())),
     );
 
     return {
+      success: true,
       hasServerNvidiaKey,
       hasServerGeminiKey,
       defaultRole:
         (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
       companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
+      databaseConnected: true,
     };
   } catch {
+    const hasEnvNvidia = Boolean(
+      typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])?.trim()),
+    );
+    const hasEnvGemini = Boolean(
+      typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim()),
+    );
+
     return {
-      hasServerNvidiaKey: false,
-      hasServerGeminiKey: false,
+      success: false,
+      hasServerNvidiaKey: hasEnvNvidia,
+      hasServerGeminiKey: hasEnvGemini,
       defaultRole: "Software Engineer (Entry Level)",
       companyName: "the hiring company",
+      databaseConnected: false,
     };
   }
 });

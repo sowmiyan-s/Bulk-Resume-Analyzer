@@ -1,4 +1,4 @@
-/** localStorage-backed settings. Keys never leave the browser except to the provider. */
+/** localStorage-backed settings. API keys are strictly forbidden from localStorage and only stored in MongoDB. */
 
 import { DEFAULT_SETTINGS, type LlmSettings } from "./llm";
 
@@ -9,7 +9,10 @@ export function loadSettings(): LlmSettings {
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<LlmSettings>;
+    const parsed = JSON.parse(raw) as Partial<LlmSettings> & { apiKey?: string };
+    if ("apiKey" in parsed) {
+      delete parsed.apiKey;
+    }
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
@@ -28,7 +31,9 @@ export function loadSettings(): LlmSettings {
 export function saveSettings(s: LlmSettings) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(s));
+    const sanitized = { ...s };
+    delete (sanitized as Record<string, unknown>)["apiKey"];
+    window.localStorage.setItem(KEY, JSON.stringify(sanitized));
   } catch {
     /* quota or private mode — settings just won't persist */
   }

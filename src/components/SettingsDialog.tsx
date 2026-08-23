@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   Check,
-  Code2,
   Cpu,
   Database,
-  Eye,
-  EyeOff,
-  Info,
   KeyRound,
+  RefreshCw,
   Settings2,
   Shield,
+  Zap,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -39,37 +37,73 @@ import {
 import { Slider } from "@/components/ui/slider";
 import type { LlmSettings } from "@/lib/llm";
 import { PROVIDER_LABEL, findModel, modelsByProvider, type ProviderId } from "@/lib/models";
-
-const KEY_HINT: Record<ProviderId, string> = {
-  nvidia:
-    "Free API key at build.nvidia.com → 'Get API Key'. (Leave blank if already saved in Admin Vault).",
-  gemini:
-    "Free API key at aistudio.google.com/apikey. (Leave blank if already saved in Admin Vault).",
-  litellm:
-    "Enter your LiteLLM master/virtual key (e.g. sk-...), or leave blank if your proxy runs unauthenticated.",
-  "openai-compatible": "Use the key for whichever endpoint you point at (Groq, OpenRouter, vLLM…).",
-};
+import { testApiKeyFn } from "@/lib/database.server";
+import type { SystemInfo } from "@/routes/index";
 
 export function SettingsDialog({
   settings,
+  systemInfo,
+  onRefreshSystem,
   onSave,
 }: {
   settings: LlmSettings;
+  systemInfo?: SystemInfo;
+  onRefreshSystem?: () => void;
   onSave: (next: LlmSettings) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<LlmSettings>(settings);
-  const [showKey, setShowKey] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
 
   useEffect(() => {
     if (open) {
       setDraft(settings);
+      onRefreshSystem?.();
     }
-  }, [open, settings]);
+  }, [open, settings, onRefreshSystem]);
 
   const model = findModel(draft.modelId);
   const grouped = modelsByProvider();
   const isCustom = model.provider === "openai-compatible";
+
+  const hasVaultKey =
+    model.provider === "nvidia"
+      ? Boolean(systemInfo?.hasServerNvidiaKey)
+      : model.provider === "gemini"
+        ? Boolean(systemInfo?.hasServerGeminiKey)
+        : model.provider === "litellm";
+
+  const handleTestKey = async () => {
+    if (model.provider !== "nvidia" && model.provider !== "gemini") {
+      toast.info(`Testing is directly supported for NVIDIA NIM and Google Gemini.`);
+      return;
+    }
+    if (!hasVaultKey) {
+      toast.error(`No API key configured in MongoDB Vault for ${PROVIDER_LABEL[model.provider]}. Please add it in Admin Panel.`);
+      return;
+    }
+
+    setTestingKey(true);
+    try {
+      toast.info(`Testing MongoDB Atlas key for ${PROVIDER_LABEL[model.provider]}...`);
+      const res = await testApiKeyFn({
+        data: {
+          provider: model.provider,
+          apiKey: "trigger-database-vault-test",
+        },
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Test failed: ${msg}`);
+    } finally {
+      setTestingKey(false);
+    }
+  };
 
   const save = () => {
     if (isCustom && !draft.customBaseUrl.trim()) {
@@ -182,38 +216,53 @@ export function SettingsDialog({
               </div>
             )}
 
-            {/* API Key Input */}
-            <div className="space-y-2">
-              <Label htmlFor="api-key" className="text-xs flex items-center justify-between">
-                <span>Personal API Key Override (Optional)</span>
-                {draft.apiKey ? (
-                  <span className="text-[10px] text-success font-medium">
-                    Overriding system key
-                  </span>
+            {/* Centralized MongoDB Key Status */}
+            <div className="rounded-xl border border-border/70 bg-background/50 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-1.5">
+                  <KeyRound className="size-3.5 text-primary" /> API Key Authentication
+                </span>
+                {hasVaultKey ? (
+                  <Badge variant="outline" className="border-success/40 bg-success/10 text-success text-[10px] font-semibold flex items-center gap-1">
+                    <Check className="size-3" /> Stored in MongoDB Vault
+                  </Badge>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground">Using Admin Vault Key</span>
+                  <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500 text-[10px] font-semibold">
+                    Key Needed in Admin Panel
+                  </Badge>
                 )}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="api-key"
-                  type={showKey ? "text" : "password"}
-                  value={draft.apiKey}
-                  placeholder="Leave empty to use shared key from Admin Vault..."
-                  onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-                  className="font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? "Hide API Key" : "Show API Key"}
-                >
-                  {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </Button>
               </div>
-              <p className="text-xs text-muted-foreground">{KEY_HINT[model.provider]}</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {hasVaultKey
+                  ? `Active API key for ${PROVIDER_LABEL[model.provider]} is stored securely in MongoDB Atlas and managed centrally via Admin Portal.`
+                  : `No API key found in MongoDB Atlas database for ${PROVIDER_LABEL[model.provider]}. Open the Admin Portal to configure it.`}
+              </p>
+              <div className="pt-1 flex items-center justify-between">
+                <Link
+                  to="/admin"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                >
+                  <Shield className="size-3" /> Manage API Keys in Admin Portal →
+                </Link>
+                {hasVaultKey && (model.provider === "nvidia" || model.provider === "gemini") && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleTestKey()}
+                    disabled={testingKey}
+                    className="text-xs h-7 px-2.5"
+                  >
+                    {testingKey ? (
+                      <RefreshCw className="size-3 animate-spin mr-1" />
+                    ) : (
+                      <Zap className="size-3 mr-1 text-primary" />
+                    )}
+                    Test Connection
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -221,7 +270,7 @@ export function SettingsDialog({
           <div className="space-y-3 rounded-xl border border-border bg-secondary/15 p-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                <Database className="size-3.5 text-primary" /> 2. MongoDB Atlas Database
+                <Database className="size-3.5 text-primary" /> 2. MongoDB Atlas Database Vault
               </h3>
               <Badge
                 variant="outline"
@@ -231,9 +280,8 @@ export function SettingsDialog({
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              Candidate resumes and evaluation metrics are automatically synchronized to your
-              MongoDB Atlas cluster (
-              <code className="text-primary font-mono text-[11px]">resume_radiance</code>).
+              Candidate resumes and evaluation metrics are synchronized to MongoDB Atlas (
+              <code className="text-primary font-mono text-[11px]">resume_radiance</code>). System-wide API keys stored in the database vault are used automatically.
             </p>
 
             <div className="pt-1">
@@ -242,8 +290,7 @@ export function SettingsDialog({
                 onClick={() => setOpen(false)}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
               >
-                <Shield className="size-3.5" /> Open Admin Portal to Manage Database &amp; System
-                Keys →
+                <Shield className="size-3.5" /> Open Admin Portal to Manage Database &amp; Vault Keys →
               </Link>
             </div>
           </div>

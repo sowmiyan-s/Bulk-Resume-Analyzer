@@ -266,10 +266,6 @@ export async function callModel(
   const messages = buildMessages(input);
   const customProxyUrl = settings.proxyUrl.trim();
 
-  if (!settings.apiKey.trim() && model.provider !== "litellm") {
-    throw new LlmError("No API key set. Open Settings and paste your provider key.", null, false);
-  }
-
   let json: Record<string, unknown>;
 
   // 1. If user explicitly provided a custom external proxy URL:
@@ -313,62 +309,14 @@ export async function callModel(
       const msg = e instanceof Error ? e.message : String(e);
       throw new LlmError(`Custom proxy request failed: ${msg}`, null, true);
     }
-  } else if (model.provider === "gemini") {
-    // 2. Direct browser call for Google Gemini
-    const url = `${GEMINI_BASE}/${model.id}:generateContent`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-goog-api-key": settings.apiKey.trim(),
-    };
-    const body = {
-      systemInstruction: { parts: [{ text: messages[0]!.content }] },
-      contents: [{ role: "user", parts: [{ text: messages[1]!.content }] }],
-      generationConfig: {
-        temperature: settings.temperature,
-        maxOutputTokens: settings.maxTokens,
-        responseMimeType: "application/json",
-      },
-    };
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
-      });
-
-      if (!res.ok) {
-        const detail = await readError(res);
-        const retryable = RETRYABLE_STATUS.has(res.status);
-        const hint =
-          res.status === 400 || res.status === 403
-            ? " Please check your Gemini API key."
-            : res.status === 429
-              ? " Rate limited — please wait a moment."
-              : "";
-        throw new LlmError(
-          `Gemini request failed (${res.status}): ${detail}${hint}`,
-          res.status,
-          retryable,
-        );
-      }
-
-      json = (await res.json()) as Record<string, unknown>;
-    } catch (e: unknown) {
-      if (e instanceof LlmError) throw e;
-      if (signal?.aborted) throw new LlmError("Cancelled.", null, false);
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new LlmError(`Gemini request failed: ${msg}`, null, true);
-    }
   } else {
-    // 3. Built-in server proxy for NVIDIA NIM, LiteLLM, and OpenAI-compatible endpoints
+    // 2. Built-in server proxy (NVIDIA NIM, Gemini, LiteLLM & OpenAI-compatible with MongoDB Atlas Vault fallback)
     try {
       json = (await executeLlmProxy({
         data: {
           provider: model.provider,
           modelId: model.id,
-          apiKey: settings.apiKey.trim() || (model.provider === "litellm" ? "sk-litellm" : ""),
+          apiKey: settings.apiKey.trim(),
           customBaseUrl: settings.customBaseUrl?.trim(),
           messages,
           temperature: settings.temperature,
@@ -384,17 +332,34 @@ export async function callModel(
         errMsg.includes("401") ||
         errMsg.includes("403") ||
         errMsg.toLowerCase().includes("unauthorized") ||
-        errMsg.toLowerCase().includes("invalid api key");
-      const isRate = errMsg.includes("429") || errMsg.toLowerCase().includes("rate limit");
+        errMsg.toLowerCase().includes("invalid api key") ||
+        errMsg.toLowerCase().includes("no api key");
+      const isRate =
+        errMsg.includes("429") ||
+        errMsg.toLowerCase().includes("rate limit") ||
+        errMsg.toLowerCase().includes("quota") ||
+        errMsg.toLowerCase().includes("resource_exhausted") ||
+        errMsg.toLowerCase().includes("too many requests");
+
+      const providerLabel =
+        model.provider === "nvidia"
+          ? "NVIDIA NIM"
+          : model.provider === "gemini"
+            ? "Google Gemini"
+            : model.provider === "litellm"
+              ? "LiteLLM"
+              : "API";
 
       throw new LlmError(
-        `${model.provider === "nvidia" ? "NVIDIA NIM" : "API"} request failed: ${errMsg}${
-          isAuth
-            ? " (Make sure your NVIDIA API key starts with nvapi-)"
-            : isRate
-              ? " (Rate limited — please wait)"
-              : ""
-        }`,
+        errMsg.includes("No API key")
+          ? errMsg
+          : isRate
+            ? `${providerLabel} rate limit reached (HTTP 429). The system is automatically cooling down and retrying.`
+            : `${providerLabel} request failed: ${errMsg}${
+                isAuth && model.provider === "nvidia"
+                  ? " (Make sure your NVIDIA API key starts with nvapi-)"
+                  : ""
+              }`,
         isAuth ? 401 : isRate ? 429 : 500,
         !isAuth,
       );

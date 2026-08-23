@@ -14,6 +14,7 @@ import {
   Shield,
   Trash2,
   Unlock,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +36,7 @@ import {
   verifyAdminPassFn,
   clearAnalysesMongoFn,
   loadAnalysesMongoFn,
+  testApiKeyFn,
   type StoredMongoAnalysis,
 } from "@/lib/database.server";
 import { effectiveScore, tierTone } from "@/lib/analysis-types";
@@ -65,6 +67,8 @@ function AdminPage() {
   const [companyName, setCompanyName] = useState("the hiring company");
   const [showKey, setShowKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [testingNvidia, setTestingNvidia] = useState(false);
+  const [testingGemini, setTestingGemini] = useState(false);
 
   // Stats & analyses
   const [analyses, setAnalyses] = useState<StoredMongoAnalysis[]>([]);
@@ -153,6 +157,58 @@ function AdminPage() {
       toast.error("Error saving settings.");
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleTestNvidia = async () => {
+    if (!nvidiaKey.trim()) {
+      toast.error("Please enter an NVIDIA API key to test.");
+      return;
+    }
+    setTestingNvidia(true);
+    try {
+      const res = await testApiKeyFn({
+        data: {
+          provider: "nvidia",
+          apiKey: nvidiaKey.trim(),
+        },
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Test failed: ${msg}`);
+    } finally {
+      setTestingNvidia(false);
+    }
+  };
+
+  const handleTestGemini = async () => {
+    if (!geminiKey.trim()) {
+      toast.error("Please enter a Gemini API key to test.");
+      return;
+    }
+    setTestingGemini(true);
+    try {
+      const res = await testApiKeyFn({
+        data: {
+          provider: "gemini",
+          apiKey: geminiKey.trim(),
+        },
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Test failed: ${msg}`);
+    } finally {
+      setTestingGemini(false);
     }
   };
 
@@ -378,8 +434,25 @@ function AdminPage() {
                   size="icon"
                   onClick={() => setShowKey((v) => !v)}
                   className="shrink-0"
+                  aria-label={showKey ? "Hide API Key" : "Show API Key"}
                 >
                   {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestNvidia()}
+                  disabled={testingNvidia || !nvidiaKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test NVIDIA NIM connection"
+                >
+                  {testingNvidia ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
@@ -394,14 +467,32 @@ function AdminPage() {
                   <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
                 )}
               </Label>
-              <Input
-                id="gemini-key"
-                type={showKey ? "text" : "password"}
-                value={geminiKey}
-                placeholder="AIza..."
-                onChange={(e) => setGeminiKey(e.target.value)}
-                className="font-mono text-xs"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="gemini-key"
+                  type={showKey ? "text" : "password"}
+                  value={geminiKey}
+                  placeholder="AIza..."
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestGemini()}
+                  disabled={testingGemini || !geminiKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test Google Gemini connection"
+                >
+                  {testingGemini ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
+                </Button>
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 Free API key from aistudio.google.com
               </p>
