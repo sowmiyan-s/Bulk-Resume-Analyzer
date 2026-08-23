@@ -53,8 +53,8 @@ export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
       id: string;
       fileName: string;
       analysis: Analysis;
-      cleanText?: string;
-      rawText?: string;
+      cleanText?: string | undefined;
+      rawText?: string | undefined;
     }) => data,
   )
   .handler(async ({ data }) => {

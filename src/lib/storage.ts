@@ -62,8 +62,8 @@ export async function saveAnalysis(input: {
   id: string;
   fileName: string;
   analysis: Analysis;
-  cleanText?: string;
-  rawText?: string;
+  cleanText?: string | undefined;
+  rawText?: string | undefined;
 }): Promise<StoredAnalysis> {
   const row: StoredAnalysis = {
     id: input.id,

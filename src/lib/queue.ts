@@ -132,13 +132,14 @@ export class RateLimitedQueue<T> {
         if (this.stopped) return;
         const message = error instanceof Error ? error.message : String(error);
         const allowed = task.isRetryable ? task.isRetryable(error) : true;
+        const willRetry = allowed && attempt <= this.opts.maxRetries;
         let waitSec = willRetry ? this.opts.retryBackoffSec * Math.pow(2, attempt - 1) : 0;
 
         // If rate limit error contains specific time instruction, honor it
         const isRateLimit = message.includes("429") || /rate[- ]limit/i.test(message);
         if (isRateLimit && willRetry) {
           const match = message.match(/try again in ([0-9.]+)\s*(s|ms|seconds)/i);
-          if (match) {
+          if (match && match[1] && match[2]) {
             const num = parseFloat(match[1]);
             const unit = match[2].toLowerCase();
             waitSec = unit === "ms" ? Math.max(2, Math.ceil(num / 1000) + 1) : Math.max(2, Math.ceil(num) + 1);

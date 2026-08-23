@@ -21,7 +21,9 @@ export type ModelTag =
   | "Deep Reasoning"
   | "Code & Tech"
   | "Unlimited Offline"
-  | "LiteLLM Proxy";
+  | "LiteLLM Proxy"
+  | "Self-Hosted"
+  | "Custom";
 
 export type ModelOption = {
   id: string;

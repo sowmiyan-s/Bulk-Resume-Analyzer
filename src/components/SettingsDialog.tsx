@@ -68,11 +68,11 @@ export function SettingsDialog({
 
   const hasVaultKey =
     model.provider === "groq"
-      ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerGroqKey)
+      ? Boolean(systemInfo?.hasServerGroqKey)
       : model.provider === "cerebras"
-        ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerCerebrasKey)
+        ? Boolean(systemInfo?.hasServerCerebrasKey)
         : model.provider === "openrouter"
-          ? Boolean((systemInfo as Record<string, unknown> | undefined)?.hasServerOpenRouterKey)
+          ? Boolean(systemInfo?.hasServerOpenRouterKey)
           : model.provider === "gemini"
             ? Boolean(systemInfo?.hasServerGeminiKey)
             : model.provider === "nvidia"

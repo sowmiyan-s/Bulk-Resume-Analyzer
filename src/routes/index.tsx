@@ -80,6 +80,9 @@ type QueueItem = {
 };
 
 export type SystemInfo = {
+  hasServerGroqKey?: boolean;
+  hasServerCerebrasKey?: boolean;
+  hasServerOpenRouterKey?: boolean;
   hasServerNvidiaKey: boolean;
   hasServerGeminiKey: boolean;
   defaultRole: string;
@@ -299,14 +302,14 @@ function Index() {
               `Candidate Name: ${a.candidateName}`,
               `Target Role: ${a.role}`,
               `Assumed Role: ${a.assumedRole}`,
-              `Executive Summary: ${a.summary}`,
+              `HR Verdict: ${a.hrVerdict}`,
               `Recruiter Impression: ${a.recruiterFirstImpression}`,
               `Matched Skills: ${(a.skillMatrix?.matched || []).join(", ")}`,
               `Missing Skills: ${(a.skillMatrix?.missing || []).join(", ")}`,
-              `Additional Skills: ${(a.skillMatrix?.additional || []).join(", ")}`,
+              `Recommended Skills: ${(a.skillMatrix?.recommended || []).join(", ")}`,
               `Strengths: ${(a.strengths || []).join("; ")}`,
-              `Critical Issues: ${(a.criticalIssues || []).map((ci) => `${ci.title}: ${ci.detail}`).join("; ")}`,
-              `Action Roadmap: ${(a.actionRoadmap || []).join("; ")}`,
+              `Critical Issues: ${(a.criticalIssues || []).map((ci) => `${ci.area} (${ci.severity}): ${ci.problem} - Fix: ${ci.fix}`).join("; ")}`,
+              `Improvement Suggestions: ${(a.techImprovementIdeas || []).join("; ")}`,
             ].join("\n\n");
             patch(item.id, { cleanText: clean });
           } else {
@@ -400,9 +403,9 @@ function Index() {
       activeM.provider === "ollama" ||
       Boolean(settings.apiKey.trim()) ||
       Boolean(settings.proxyUrl.trim()) ||
-      (activeM.provider === "groq" && (systemInfo as Record<string, unknown>).hasServerGroqKey) ||
-      (activeM.provider === "cerebras" && (systemInfo as Record<string, unknown>).hasServerCerebrasKey) ||
-      (activeM.provider === "openrouter" && (systemInfo as Record<string, unknown>).hasServerOpenRouterKey) ||
+      (activeM.provider === "groq" && Boolean(systemInfo.hasServerGroqKey)) ||
+      (activeM.provider === "cerebras" && Boolean(systemInfo.hasServerCerebrasKey)) ||
+      (activeM.provider === "openrouter" && Boolean(systemInfo.hasServerOpenRouterKey)) ||
       (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
       (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
 
@@ -597,16 +600,25 @@ function Index() {
           onSuccess: (rid, analysis) => {
             // Preserve officer overrides across a re-analysis.
             const prevAnalysis = itemsRef.current.find((i) => i.id === rid)?.analysis;
+            const merged: Analysis = {
+              ...analysis,
+              manualScore: prevAnalysis?.manualScore ?? null,
+              officerNotes: prevAnalysis?.officerNotes ?? "",
+            };
             patch(rid, {
               status: "done",
               progress: 100,
               message: "",
-              analysis: {
-                ...analysis,
-                manualScore: prevAnalysis?.manualScore ?? null,
-                officerNotes: prevAnalysis?.officerNotes ?? "",
-              },
+              analysis: merged,
             });
+            const item = itemsRef.current.find((i) => i.id === rid);
+            void saveAnalysis({
+              id: rid,
+              fileName: item?.file.name ?? rid,
+              analysis: merged,
+              cleanText: item?.cleanText,
+              rawText: item?.rawText,
+            }).catch(() => {});
             toast.success("Re-analyzed with your corrected text.");
           },
           onError: (rid, message, willRetry) => {
@@ -637,7 +649,7 @@ function Index() {
 
   const deleteItem = useCallback(
     async (id: string) => {
-      setItems((prev) => prev.filter((i) => i.id !== id));
+      setItems((prev) => prev.filter((i) => !id || i.id !== id));
       if (drawerId === id) setDrawerId(null);
       await deleteStoredAnalysis(id);
       toast.success("Candidate record deleted.");
@@ -663,14 +675,7 @@ function Index() {
         toast.error("Wait for the current batch to finish.");
         return;
       }
-      const activeJd = jd.trim();
-      if (!activeJd) {
-        toast.error("Please paste a Job Description first.");
-        return;
-      }
-      if (!useJd) {
-        setUseJd(true);
-      }
+      const activeJd = useJd && jd.trim() ? jd.trim() : undefined;
 
       const activeM = findModel(settings.modelId);
       const hasKey =
@@ -679,9 +684,9 @@ function Index() {
         activeM.provider === "ollama" ||
         Boolean(settings.apiKey.trim()) ||
         Boolean(settings.proxyUrl.trim()) ||
-        (activeM.provider === "groq" && (systemInfo as Record<string, unknown>).hasServerGroqKey) ||
-        (activeM.provider === "cerebras" && (systemInfo as Record<string, unknown>).hasServerCerebrasKey) ||
-        (activeM.provider === "openrouter" && (systemInfo as Record<string, unknown>).hasServerOpenRouterKey) ||
+        (activeM.provider === "groq" && Boolean(systemInfo.hasServerGroqKey)) ||
+        (activeM.provider === "cerebras" && Boolean(systemInfo.hasServerCerebrasKey)) ||
+        (activeM.provider === "openrouter" && Boolean(systemInfo.hasServerOpenRouterKey)) ||
         (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
         (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
 
@@ -702,7 +707,12 @@ function Index() {
       setItems((prev) =>
         prev.map((i) =>
           !idSet || idSet.has(i.id)
-            ? { ...i, status: "queued", progress: 0, message: "Queued for JD re-evaluation…" }
+            ? {
+                ...i,
+                status: "queued",
+                progress: 0,
+                message: activeJd ? "Queued for JD re-evaluation…" : "Queued for re-evaluation…",
+              }
             : i,
         ),
       );
@@ -754,7 +764,11 @@ function Index() {
           onIdle: () => {
             setRunning(false);
             setCooldownLeft(0);
-            toast.success("Job Description re-evaluation complete.");
+            toast.success(
+              activeJd
+                ? "Job Description re-evaluation complete."
+                : "Re-evaluation complete.",
+            );
           },
         },
       );
@@ -772,7 +786,11 @@ function Index() {
       );
 
       void queue.run();
-      toast.info(`Started re-evaluating ${targetItems.length} candidate(s) against current JD.`);
+      toast.info(
+        activeJd
+          ? `Started re-evaluating ${targetItems.length} candidate(s) against current JD.`
+          : `Started re-evaluating ${targetItems.length} candidate(s).`,
+      );
     },
     [running, jd, useJd, settings, systemInfo, concurrency, cooldownSec, maxRetries, patch, analyzeOne],
   );

@@ -45,11 +45,11 @@ export function MasterTable({
   rows: MasterRow[];
   onOpen: (id: string) => void;
   onExportPdf: (id: string) => void;
-  onDelete?: (id: string) => void;
-  onDeleteMany?: (ids: string[]) => void;
-  onReevaluate?: (id: string) => void;
-  onReevaluateMany?: (ids: string[]) => void;
-  hasActiveJd?: boolean;
+  onDelete?: ((id: string) => void) | undefined;
+  onDeleteMany?: ((ids: string[]) => void) | undefined;
+  onReevaluate?: ((id: string) => void) | undefined;
+  onReevaluateMany?: ((ids: string[]) => void) | undefined;
+  hasActiveJd?: boolean | undefined;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);
