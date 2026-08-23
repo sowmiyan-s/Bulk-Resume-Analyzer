@@ -417,7 +417,7 @@ function Index() {
     const started = new Map<string, number>();
 
     const queue = new RateLimitedQueue<Analysis>(
-      { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(3, cooldownSec * 2) },
+      { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(2, cooldownSec) },
       {
         onStart: (id, attempt) => {
           started.set(id, Date.now());
@@ -705,7 +705,7 @@ function Index() {
       const started = new Map<string, number>();
 
       const queue = new RateLimitedQueue<Analysis>(
-        { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(3, cooldownSec * 2) },
+        { concurrency, cooldownSec, maxRetries, retryBackoffSec: Math.max(2, cooldownSec) },
         {
           onStart: (id, attempt) => {
             started.set(id, Date.now());
