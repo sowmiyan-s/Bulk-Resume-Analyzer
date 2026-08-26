@@ -4,7 +4,7 @@ import {
   Cpu,
   Database,
   KeyRound,
-  RefreshCw,
+  Lock,
   Settings2,
   Shield,
   Zap,
@@ -23,8 +23,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -34,10 +32,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import type { LlmSettings } from "@/lib/llm";
-import { PROVIDER_LABEL, findModel, modelsByProvider, type ProviderId } from "@/lib/models";
-import { testApiKeyFn } from "@/lib/database.server";
+import { findModel, modelsByProvider, PROVIDER_LABEL, type ProviderId } from "@/lib/models";
 import type { SystemInfo } from "@/routes/index";
 
 export function SettingsDialog({
@@ -53,7 +52,6 @@ export function SettingsDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<LlmSettings>(settings);
-  const [testingKey, setTestingKey] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -63,58 +61,15 @@ export function SettingsDialog({
   }, [open, settings, onRefreshSystem]);
 
   const model = findModel(draft.modelId);
-  const grouped = modelsByProvider();
   const isCustom = model.provider === "openai-compatible";
 
-  const hasVaultKey =
-    model.provider === "groq"
-      ? Boolean(systemInfo?.hasServerGroqKey)
-      : model.provider === "cerebras"
-        ? Boolean(systemInfo?.hasServerCerebrasKey)
-        : model.provider === "openrouter"
-          ? Boolean(systemInfo?.hasServerOpenRouterKey)
-          : model.provider === "gemini"
-            ? Boolean(systemInfo?.hasServerGeminiKey)
-            : model.provider === "nvidia"
-              ? Boolean(systemInfo?.hasServerNvidiaKey)
-              : model.provider === "ollama" || model.provider === "litellm";
-
-  const handleTestKey = async () => {
-    if (
-      model.provider !== "groq" &&
-      model.provider !== "cerebras" &&
-      model.provider !== "openrouter" &&
-      model.provider !== "nvidia" &&
-      model.provider !== "gemini"
-    ) {
-      toast.info(`Testing is directly supported for Groq, Cerebras, OpenRouter, Gemini, and NVIDIA NIM.`);
-      return;
-    }
-    if (!hasVaultKey) {
-      toast.error(`No API key configured in MongoDB Vault for ${PROVIDER_LABEL[model.provider]}. Please add it in Admin Panel.`);
-      return;
-    }
-
-    setTestingKey(true);
-    try {
-      toast.info(`Testing MongoDB Atlas key for ${PROVIDER_LABEL[model.provider]}...`);
-      const res = await testApiKeyFn({
-        data: {
-          provider: model.provider,
-          apiKey: "trigger-database-vault-test",
-        },
-      });
-      if (res.success) {
-        toast.success(res.message);
-      } else {
-        toast.error(res.message);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Test failed: ${msg}`);
-    } finally {
-      setTestingKey(false);
-    }
+  const handleModelChange = (newModelId: string) => {
+    const nextModel = findModel(newModelId);
+    setDraft((prev) => ({
+      ...prev,
+      modelId: newModelId,
+    }));
+    toast.info(`Switched to ${nextModel.label}`);
   };
 
   const save = () => {
@@ -124,7 +79,7 @@ export function SettingsDialog({
     }
     onSave(draft);
     setOpen(false);
-    toast.success("Settings saved.");
+    toast.success(`Active model updated to ${model.label}`);
   };
 
   return (
@@ -157,31 +112,25 @@ export function SettingsDialog({
         </DialogHeader>
 
         <div className="space-y-6 py-2">
-          {/* Section 1: Model Selection */}
-          <div className="space-y-4 rounded-xl border border-border bg-secondary/20 p-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-              <KeyRound className="size-3.5 text-primary" /> 1. Model Provider
-            </h3>
+          {/* Section 1: Active Screening Model Selector */}
+          <div className="space-y-4 rounded-xl border border-primary/30 bg-secondary/20 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Cpu className="size-3.5 text-primary" /> Active Screening Model
+              </h3>
+              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px] font-semibold flex items-center gap-1">
+                <Zap className="size-3" /> Live Switching
+              </Badge>
+            </div>
 
             <div className="space-y-2">
-              <Label htmlFor="model-select" className="text-xs">
-                Active LLM Model
-              </Label>
-              <Select
-                value={draft.modelId}
-                onValueChange={(val) => {
-                  setDraft({
-                    ...draft,
-                    modelId: val,
-                  });
-                }}
-              >
-                <SelectTrigger id="model-select" className="text-xs">
-                  <SelectValue placeholder="Select a model" />
+              <Select value={draft.modelId} onValueChange={handleModelChange}>
+                <SelectTrigger className="text-xs font-semibold border-primary/40 bg-background/90 h-9">
+                  <SelectValue placeholder="Select screening model" />
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
-                  {(Object.keys(grouped) as ProviderId[]).map((prov) => {
-                    const list = grouped[prov];
+                  {(Object.keys(modelsByProvider()) as ProviderId[]).map((prov) => {
+                    const list = modelsByProvider()[prov];
                     if (!list.length) return null;
                     return (
                       <SelectGroup key={prov}>
@@ -193,10 +142,7 @@ export function SettingsDialog({
                             <div className="flex items-center gap-2">
                               <span>{m.label}</span>
                               {m.tag && (
-                                <Badge
-                                  variant="secondary"
-                                  className="text-[9px] px-1.5 py-0 font-medium"
-                                >
+                                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-medium">
                                   {m.tag}
                                 </Badge>
                               )}
@@ -210,7 +156,39 @@ export function SettingsDialog({
               </Select>
             </div>
 
-            {/* Custom URL for OpenAI-compatible / LiteLLM */}
+            <div className="rounded-xl border border-border/80 bg-background/70 p-3.5 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                  {model.label}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="secondary" className="text-[10px] font-mono">
+                    Recommended: {model.recommendedConcurrency} worker{model.recommendedConcurrency > 1 ? "s" : ""} · {model.recommendedCooldownSec}s delay
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] border-border bg-secondary/50 font-mono">
+                    {model.provider.toUpperCase()}
+                  </Badge>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {model.note}
+              </p>
+              <div className="pt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/40">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Shield className="size-3 text-primary" /> Master API keys managed in Admin Portal.
+                </span>
+                <Link
+                  to="/admin"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                >
+                  Admin Portal Keys &amp; Vault →
+                </Link>
+              </div>
+            </div>
+
+            {/* Custom URL for OpenAI-compatible / LiteLLM if applicable */}
             {(isCustom || model.provider === "litellm") && (
               <div className="space-y-2">
                 <Label htmlFor="base-url" className="text-xs">
@@ -228,53 +206,19 @@ export function SettingsDialog({
               </div>
             )}
 
-            {/* Centralized MongoDB Key Status */}
+            {/* Centralized MongoDB Key Status & Auto-Failover */}
             <div className="rounded-xl border border-border/70 bg-background/50 p-3.5 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold flex items-center gap-1.5">
-                  <KeyRound className="size-3.5 text-primary" /> API Key Authentication
+                  <KeyRound className="size-3.5 text-primary" /> Multi-Provider Auto-Failover
                 </span>
-                {hasVaultKey ? (
-                  <Badge variant="outline" className="border-success/40 bg-success/10 text-success text-[10px] font-semibold flex items-center gap-1">
-                    <Check className="size-3" /> Stored in MongoDB Vault
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500 text-[10px] font-semibold">
-                    Key Needed in Admin Panel
-                  </Badge>
-                )}
+                <Badge variant="outline" className="border-success/40 bg-success/10 text-success text-[10px] font-semibold flex items-center gap-1">
+                  <Check className="size-3" /> Auto Rate-Limit Cascade
+                </Badge>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {hasVaultKey
-                  ? `Active API key for ${PROVIDER_LABEL[model.provider]} is stored securely in MongoDB Atlas and managed centrally via Admin Portal.`
-                  : `No API key found in MongoDB Atlas database for ${PROVIDER_LABEL[model.provider]}. Open the Admin Portal to configure it.`}
+                If the active model encounters rate limits (HTTP 429), the engine automatically cascades to other active providers in MongoDB Vault (Qwen DashScope, Cerebras, Groq, Gemini, OpenRouter, NVIDIA) with zero downtime.
               </p>
-              <div className="pt-1 flex items-center justify-between">
-                <Link
-                  to="/admin"
-                  onClick={() => setOpen(false)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-                >
-                  <Shield className="size-3" /> Manage API Keys in Admin Portal →
-                </Link>
-                {hasVaultKey && (model.provider === "nvidia" || model.provider === "gemini") && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void handleTestKey()}
-                    disabled={testingKey}
-                    className="text-xs h-7 px-2.5"
-                  >
-                    {testingKey ? (
-                      <RefreshCw className="size-3 animate-spin mr-1" />
-                    ) : (
-                      <Zap className="size-3 mr-1 text-primary" />
-                    )}
-                    Test Connection
-                  </Button>
-                )}
-              </div>
             </div>
           </div>
 
@@ -378,3 +322,4 @@ export function SettingsDialog({
     </Dialog>
   );
 }
+

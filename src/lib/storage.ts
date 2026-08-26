@@ -32,18 +32,23 @@ export type StoredAnalysis = {
 
 const LS_KEY = "resume-radiance.results.v1";
 
-/* ----------------------------- localStorage ----------------------------- */
+let memoryCache: StoredAnalysis[] | null = null;
 
 function readLocal(): StoredAnalysis[] {
+  if (memoryCache !== null) return memoryCache;
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(window.localStorage.getItem(LS_KEY) ?? "[]") as StoredAnalysis[];
+    const raw = window.localStorage.getItem(LS_KEY);
+    memoryCache = raw ? (JSON.parse(raw) as StoredAnalysis[]) : [];
+    return memoryCache;
   } catch {
+    memoryCache = [];
     return [];
   }
 }
 
 function writeLocal(rows: StoredAnalysis[]) {
+  memoryCache = rows;
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LS_KEY, JSON.stringify(rows.slice(-500)));

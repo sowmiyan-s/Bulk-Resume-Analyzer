@@ -48,6 +48,47 @@ export type DataGap = {
   impact: string;
 };
 
+export type SectionAudit = {
+  score: number;
+  max: number;
+  audit: string;
+  fixTip: string;
+};
+
+export type SkillsSectionAudit = SectionAudit & {
+  matchedKeywords: string[];
+  missingCriticalSkills: string[];
+};
+
+export type ProjectsSectionAudit = SectionAudit & {
+  architectureRating: string;
+  liveProof: boolean;
+};
+
+export type InternshipSectionAudit = SectionAudit & {
+  jdRelevancePct: number;
+  jdRelevanceExplanation: string;
+};
+
+export type CertificationsSectionAudit = SectionAudit & {
+  verifiedCount: number;
+};
+
+export type SectionAudits = {
+  summary: SectionAudit;
+  skills: SkillsSectionAudit;
+  projects: ProjectsSectionAudit;
+  internships: InternshipSectionAudit;
+  certifications: CertificationsSectionAudit;
+  achievements: SectionAudit;
+};
+
+export type SectionImprovement = {
+  section: string;
+  currentGap: string;
+  actionableFix: string;
+};
+
 export type StructureAssessment = {
   /** 0-100: how cleanly a human + an ATS can parse and scan this resume. */
   score: number;
@@ -55,6 +96,7 @@ export type StructureAssessment = {
   label: string;
   notes: string[];
 };
+
 
 export type ScoreCategoryId =
   | "all"
@@ -241,6 +283,11 @@ export type Analysis = {
   manualScore: number | null;
   officerNotes: string;
 
+  /* ---- Section-by-Section Real Assessment Architecture ---- */
+  sectionAudits: SectionAudits;
+  sectionImprovements: SectionImprovement[];
+  placementTips: string[];
+
   /* ---- v2: clarity, honesty & role-relevance ---- */
   /** The role the model judged the resume against when no JD was given. */
   assumedRole: string;
@@ -288,7 +335,8 @@ const strArr = (v: unknown): string[] =>
             o["description"] ??
             o["problem"] ??
             o["skill"] ??
-            o["idea"],
+            o["idea"] ??
+            o["tip"],
         );
       }
       return str(x);
@@ -405,6 +453,84 @@ function toRelevance(
   };
 }
 
+function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const sumRaw = (pick(o, "summary", "summary_audit", "professional_summary") ?? {}) as Record<string, unknown>;
+  const sklRaw = (pick(o, "skills", "skills_audit", "technical_skills_audit", "technical_skills") ?? {}) as Record<string, unknown>;
+  const prjRaw = (pick(o, "projects", "projects_audit", "project_work") ?? {}) as Record<string, unknown>;
+  const expRaw = (pick(o, "internships", "internship_experience_audit", "internship_experience", "internships_audit", "experience") ?? {}) as Record<string, unknown>;
+  const cerRaw = (pick(o, "certifications", "certifications_audit", "accreditations") ?? {}) as Record<string, unknown>;
+  const achRaw = (pick(o, "achievements", "achievements_audit", "awards") ?? {}) as Record<string, unknown>;
+
+  const findScore = (key: string, defScore: number, maxVal: number) => {
+    const row = breakdown.find((b) => b.category.toLowerCase().includes(key));
+    if (row) return Math.min(maxVal, Math.round((row.score / (row.max || 100)) * maxVal));
+    return defScore;
+  };
+
+  return {
+    summary: {
+      score: clamp(num(pick(sumRaw, "score"), findScore("summary", 8, 10)), 0, 10),
+      max: 10,
+      audit: str(pick(sumRaw, "audit", "critique", "assessment"), "Evaluated for professional clarity, career alignment, and concise technical impact."),
+      fixTip: str(pick(sumRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Lead with technical domain focus, total projects/internships built, and core modern stack."),
+    },
+    skills: {
+      score: clamp(num(pick(sklRaw, "score"), findScore("skills", 20, 25)), 0, 25),
+      max: 25,
+      audit: str(pick(sklRaw, "audit", "critique", "assessment"), "Evaluated depth of modern frameworks, programming languages, database systems, and developer tooling."),
+      fixTip: str(pick(sklRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Categorize skills cleanly by Languages, Backend, Frontend, Cloud & Databases with explicit versions."),
+      matchedKeywords: strArr(pick(sklRaw, "matched_keywords", "matchedKeywords", "matched")),
+      missingCriticalSkills: strArr(pick(sklRaw, "missing_critical_skills", "missingCriticalSkills", "missing")),
+    },
+    projects: {
+      score: clamp(num(pick(prjRaw, "score"), findScore("project", 20, 25)), 0, 25),
+      max: 25,
+      audit: str(pick(prjRaw, "audit", "critique", "assessment"), "Evaluated project architecture complexity, API integrations, data modeling, and verifiable deployments."),
+      fixTip: str(pick(prjRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Detail backend architecture, schema design, latency metrics, and verifiable GitHub / live demo links."),
+      architectureRating: str(pick(prjRaw, "architecture_rating", "architectureRating", "complexity"), "Production Architecture"),
+      liveProof: Boolean(pick(prjRaw, "live_proof", "liveProof", "has_links", "verifiable")),
+    },
+    internships: {
+      score: clamp(num(pick(expRaw, "score"), findScore("internship", 16, 20)), 0, 20),
+      max: 20,
+      jdRelevancePct: clamp(num(pick(expRaw, "jd_relevance_pct", "jdRelevancePct", "relevance_pct", "relevance"), 80), 0, 100),
+      jdRelevanceExplanation: str(pick(expRaw, "jd_relevance_explanation", "jdRelevanceExplanation", "relevance_explanation"), "Assessed direct mapping between practical responsibilities and target job requirements."),
+      audit: str(pick(expRaw, "audit", "critique", "assessment"), "Evaluated hands-on production code contributions, quantifiable business impact, and workflow ownership."),
+      fixTip: str(pick(expRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Structure bullets with STAR method (Situation, Task, Action, Measurable Metric Outcome)."),
+    },
+    certifications: {
+      score: clamp(num(pick(cerRaw, "score"), findScore("cert", 8, 10)), 0, 10),
+      max: 10,
+      audit: str(pick(cerRaw, "audit", "critique", "assessment"), "Evaluated verifiable vendor/cloud accreditations (AWS, GCP, Azure, Oracle, Cisco, Kubernetes)."),
+      fixTip: str(pick(cerRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Include verifiable credential IDs, issue dates, and credential links for verified cloud certifications."),
+      verifiedCount: clamp(num(pick(cerRaw, "verified_count", "verifiedCount", "count"), 1), 0, 10),
+    },
+    achievements: {
+      score: clamp(num(pick(achRaw, "score"), findScore("achieve", 8, 10)), 0, 10),
+      max: 10,
+      audit: str(pick(achRaw, "audit", "critique", "assessment"), "Evaluated hackathons, competitive programming ranks, tech awards, open-source PRs, and verifiable proof."),
+      fixTip: str(pick(achRaw, "fix_tip", "fixTip", "tip", "recommendation"), "Highlight competitive ratings (LeetCode, Codeforces), hackathon podium placements, and open source contributions."),
+    },
+  };
+}
+
+function toSectionImprovements(v: unknown): SectionImprovement[] {
+  return arr(v)
+    .map((raw) => {
+      if (typeof raw === "string") {
+        return { section: "General", currentGap: raw, actionableFix: "" };
+      }
+      const o = (raw ?? {}) as Record<string, unknown>;
+      return {
+        section: str(pick(o, "section", "area", "category"), "Section"),
+        currentGap: str(pick(o, "current_gap", "currentGap", "gap", "flaw", "problem", "issue")),
+        actionableFix: str(pick(o, "actionable_fix", "actionableFix", "fix", "solution", "tip", "action")),
+      };
+    })
+    .filter((s) => s.currentGap || s.actionableFix);
+}
+
 export function normalizeAnalysis(raw: unknown): Analysis {
   const o = (raw ?? {}) as Record<string, unknown>;
   const matrixRaw = (pick(o, "skill_matrix", "skillMatrix") ?? {}) as Record<string, unknown>;
@@ -435,16 +561,15 @@ export function normalizeAnalysis(raw: unknown): Analysis {
 
   const jdScoreNum = rawJdScore !== undefined && rawJdScore !== null ? clamp(num(rawJdScore)) : null;
   const sumBreakdown = breakdown.length >= 3 ? breakdown.reduce((acc, b) => acc + b.score, 0) : 0;
-  const rawOverall = num(pick(o, "overall_score", "overallScore", "atsScore", "score"));
-
+  const explicitOverall = pick(o, "overall_score", "overallScore", "atsScore", "score");
   const overallScore =
-    rawOverall > 0
-      ? clamp(rawOverall)
+    explicitOverall !== undefined
+      ? clamp(num(explicitOverall))
       : sumBreakdown > 0
         ? clamp(sumBreakdown)
-        : jdScoreNum !== null && jdScoreNum > 0
+        : jdScoreNum !== null
           ? jdScoreNum
-          : 75;
+          : 0;
   const inferredRole = str(
     pick(
       o,
@@ -499,6 +624,9 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     jdVerdict: str(pick(jdRaw, "verdict", "recommendation") ?? pick(o, "jd_verdict")),
     manualScore: null,
     officerNotes: "",
+    sectionAudits: toSectionAudits(pick(o, "section_audits", "sectionAudits", "sections"), breakdown),
+    sectionImprovements: toSectionImprovements(pick(o, "section_improvements", "sectionImprovements", "section_fixes", "actionable_improvements")),
+    placementTips: strArr(pick(o, "placement_tips", "placementTips", "interview_tips", "tips")),
     assumedRole: inferredRole,
     evaluationBasis: basis,
     structure: toStructure(pick(o, "structure", "structure_assessment", "document_structure")),
@@ -512,6 +640,7 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     ),
   };
 }
+
 
 /** Score actually used for ranking — officer override wins. */
 export const effectiveScore = (a: Analysis): number => a.manualScore ?? a.overallScore;

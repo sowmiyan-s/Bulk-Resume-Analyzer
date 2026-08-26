@@ -2,10 +2,16 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Award,
+  CheckCircle2,
   ChevronsUpDown,
   FileDown,
+  Filter,
   RefreshCw,
   Search,
+  Sliders,
+  Sparkles,
+  Target,
   Trash2,
   X,
 } from "lucide-react";
@@ -14,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
   Table,
   TableBody,
@@ -56,6 +63,8 @@ export function MasterTable({
   onReevaluate,
   onReevaluateMany,
   hasActiveJd,
+  shortlistCutoff = 75,
+  onShortlistCutoffChange,
 }: {
   rows: MasterRow[];
   onOpen: (id: string) => void;
@@ -65,13 +74,22 @@ export function MasterTable({
   onReevaluate?: ((id: string) => void) | undefined;
   onReevaluateMany?: ((ids: string[]) => void) | undefined;
   hasActiveJd?: boolean | undefined;
+  shortlistCutoff?: number;
+  onShortlistCutoffChange?: (val: number) => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [scoreFilter, setScoreFilter] = useState<ScoreCategoryId>("all");
+  const [onlyShortlisted, setOnlyShortlisted] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const cutoff = shortlistCutoff ?? 75;
+
+  const shortlistedCount = useMemo(() => {
+    return rows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
+  }, [rows, cutoff]);
 
   const tierCounts = useMemo(() => {
     return {
@@ -98,13 +116,16 @@ export function MasterTable({
     const q = query.trim().toLowerCase();
     let list = rows.filter((r) => {
       if (!r || !r.analysis) return false;
+      const score = effectiveScore(r.analysis);
+
+      if (onlyShortlisted && score < cutoff) return false;
+
       const tier = r.analysis.readinessTier || "";
       if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
 
       if (scoreFilter !== "all") {
         const cat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
         if (cat) {
-          const score = effectiveScore(r.analysis);
           if (score < cat.min || score > cat.max) return false;
         }
       }
@@ -119,6 +140,7 @@ export function MasterTable({
         (a.skillMatrix?.missing || []).join(" ").toLowerCase().includes(q)
       );
     });
+
 
     const dir = asc ? 1 : -1;
     const cmp: Record<SortKey, (a: MasterRow, b: MasterRow) => number> = {
@@ -223,13 +245,16 @@ export function MasterTable({
 
   const filterOptions = [
     { id: "all", label: "All Applicants", count: tierCounts.all },
-    { id: "Tier 1", label: "Shortlisted", count: tierCounts["Tier 1"] },
-    { id: "Tier 2", label: "Needs Polish", count: tierCounts["Tier 2"] },
-    { id: "Tier 3", label: "Needs Overhaul", count: tierCounts["Tier 3"] },
+    { id: "Tier 1", label: "Tier 1", count: tierCounts["Tier 1"] },
+    { id: "Tier 2", label: "Tier 2", count: tierCounts["Tier 2"] },
+    { id: "Tier 3", label: "Tier 3", count: tierCounts["Tier 3"] },
   ];
+
+  const presets = [60, 70, 75, 80, 85, 90];
 
   return (
     <div className="space-y-3.5">
+      {/* Search & Top Filters */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -251,7 +276,7 @@ export function MasterTable({
               value={scoreFilter}
               onValueChange={(v) => setScoreFilter(v as ScoreCategoryId)}
             >
-              <SelectTrigger className="h-8 min-w-[175px] text-xs font-medium rounded-xl bg-secondary/30 border-border/80">
+              <SelectTrigger className="h-8 min-w-[165px] text-xs font-medium rounded-xl bg-secondary/30 border-border/80">
                 <SelectValue placeholder="Score Category" />
               </SelectTrigger>
               <SelectContent className="max-h-[300px]">
@@ -293,6 +318,67 @@ export function MasterTable({
               </Button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Shortlist % Cutoff Controller Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <Target className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-xs font-bold text-foreground">Shortlist Threshold:</span>
+            <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              ≥ {cutoff}%
+            </span>
+          </div>
+
+          {/* Quick Cutoff Preset Buttons */}
+          <div className="flex items-center gap-1">
+            {presets.map((p) => (
+              <Button
+                key={p}
+                size="sm"
+                variant={cutoff === p ? "default" : "outline"}
+                className={`h-6 px-2 text-[11px] font-semibold rounded-md ${
+                  cutoff === p
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"
+                    : "bg-card/80 text-muted-foreground hover:text-foreground border-border/80"
+                }`}
+                onClick={() => onShortlistCutoffChange?.(p)}
+              >
+                {p}%
+              </Button>
+            ))}
+          </div>
+
+          {onShortlistCutoffChange && (
+            <div className="w-28 hidden sm:block">
+              <Slider
+                value={[cutoff]}
+                min={40}
+                max={95}
+                step={5}
+                onValueChange={([v]) => onShortlistCutoffChange(v ?? 75)}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Shortlist Filter Toggle & Live Counter */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={onlyShortlisted ? "default" : "outline"}
+            className={`h-7 text-xs font-bold rounded-lg transition-all ${
+              onlyShortlisted
+                ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
+                : "bg-card hover:bg-secondary text-foreground border-emerald-500/40"
+            }`}
+            onClick={() => setOnlyShortlisted((prev) => !prev)}
+          >
+            <CheckCircle2 className="size-3.5 mr-1 text-emerald-400" />
+            {onlyShortlisted ? "Showing Shortlisted" : "Filter Shortlisted Only"} ({shortlistedCount} / {rows.length})
+          </Button>
         </div>
       </div>
 
@@ -394,7 +480,7 @@ export function MasterTable({
                   Score
                 </Th>
                 <Th k="tier" className="w-36">
-                  Readiness
+                  Readiness / Status
                 </Th>
                 <Th k="jd" className="w-24">
                   JD Match
@@ -421,6 +507,7 @@ export function MasterTable({
               {sorted.map((row, index) => {
                 const a = row.analysis;
                 const score = effectiveScore(a);
+                const isShortlisted = score >= cutoff;
                 const totalIssues = (a.criticalIssues || []).length;
                 const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
                 const isSelected = selectedIds.has(row.id);
@@ -428,8 +515,12 @@ export function MasterTable({
                 return (
                   <TableRow
                     key={row.id}
-                    className={`cursor-pointer transition-colors ${
-                      isSelected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-secondary/30"
+                    className={`cursor-pointer transition-all ${
+                      isShortlisted
+                        ? "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 hover:bg-emerald-500/15"
+                        : isSelected
+                          ? "bg-primary/5 hover:bg-primary/10"
+                          : "hover:bg-secondary/30"
                     }`}
                     onClick={() => onOpen(row.id)}
                   >
@@ -448,9 +539,19 @@ export function MasterTable({
                       {index + 1}
                     </TableCell>
                     <TableCell>
-                      <p className="max-w-[17rem] truncate text-xs font-semibold text-foreground">
-                        {a.candidateName}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="max-w-[17rem] truncate text-xs font-semibold text-foreground">
+                          {a.candidateName}
+                        </p>
+                        {isShortlisted && (
+                          <span
+                            className="inline-flex items-center text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20"
+                            title={`Candidate meets custom shortlist threshold of ${cutoff}%`}
+                          >
+                            🎯 Shortlist
+                          </span>
+                        )}
+                      </div>
                       <p className="max-w-[17rem] truncate text-xs text-muted-foreground mt-0.5">
                         {a.role} <span className="opacity-60">· {row.fileName}</span>
                       </p>
@@ -461,7 +562,11 @@ export function MasterTable({
                           const cat = getScoreCategory(score);
                           return (
                             <span
-                              className={`inline-flex items-center justify-center rounded-lg px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`}
+                              className={`inline-flex items-center justify-center rounded-lg px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${
+                                isShortlisted
+                                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/40 shadow-xs"
+                                  : `${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`
+                              }`}
                               title={`${cat.label} — ${cat.description}`}
                             >
                               {score}
@@ -476,12 +581,14 @@ export function MasterTable({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={`whitespace-nowrap text-xs font-medium rounded-md ${tierTone(a.readinessTier)}`}
-                      >
-                        {a.readinessTier.replace(/^Tier \d: /, "")}
-                      </Badge>
+                      <div className="flex flex-col gap-1 items-start">
+                        <Badge
+                          variant="outline"
+                          className={`whitespace-nowrap text-xs font-medium rounded-md ${tierTone(a.readinessTier)}`}
+                        >
+                          {a.readinessTier.replace(/^Tier \d: /, "")}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs font-medium">
                       {a.jdScore !== null ? (
@@ -552,8 +659,8 @@ export function MasterTable({
                                 onDelete(row.id);
                               }
                             }}
-                            title="Delete candidate record"
-                            aria-label="Delete candidate record"
+                            title="Delete candidate"
+                            aria-label="Delete candidate"
                           >
                             <Trash2 className="size-3.5" />
                           </Button>
@@ -570,3 +677,4 @@ export function MasterTable({
     </div>
   );
 }
+

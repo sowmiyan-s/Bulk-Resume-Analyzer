@@ -52,6 +52,7 @@ import {
 import { effectiveScore, tierTone } from "@/lib/analysis-types";
 import { modelsByProvider, PROVIDER_LABEL, type ProviderId } from "@/lib/models";
 import { exportCsv } from "@/lib/report";
+import { loadSettings, saveSettings } from "@/lib/settings";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -72,6 +73,7 @@ function AdminPage() {
   const [loading, setLoading] = useState(false);
 
   // Vault state
+  const [qwenKey, setQwenKey] = useState("");
   const [groqKey, setGroqKey] = useState("");
   const [cerebrasKey, setCerebrasKey] = useState("");
   const [openrouterKey, setOpenrouterKey] = useState("");
@@ -82,6 +84,7 @@ function AdminPage() {
   const [defaultModelId, setDefaultModelId] = useState("llama-3.3-70b-versatile");
   const [showKey, setShowKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [testingQwen, setTestingQwen] = useState(false);
   const [testingGroq, setTestingGroq] = useState(false);
   const [testingCerebras, setTestingCerebras] = useState(false);
   const [testingOpenRouter, setTestingOpenRouter] = useState(false);
@@ -101,6 +104,7 @@ function AdminPage() {
     try {
       const res = await getAdminSettingsFn({ data: { passcode: pass } });
       if (res.success && res.settings) {
+        setQwenKey(res.settings.qwenApiKey || "");
         setGroqKey(res.settings.groqApiKey || "");
         setCerebrasKey(res.settings.cerebrasApiKey || "");
         setOpenrouterKey(res.settings.openrouterApiKey || "");
@@ -165,6 +169,7 @@ function AdminPage() {
         data: {
           passcode,
           settings: {
+            qwenApiKey: qwenKey,
             groqApiKey: groqKey,
             cerebrasApiKey: cerebrasKey,
             openrouterApiKey: openrouterKey,
@@ -178,9 +183,21 @@ function AdminPage() {
       });
       if (res.success) {
         toast.success("API keys & system settings saved to MongoDB Atlas!");
+        const current = loadSettings();
+        const updated = {
+          ...current,
+          modelId: defaultModelId,
+          defaultRole,
+          companyName,
+        };
+        saveSettings(updated);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("rr:model-changed", { detail: defaultModelId }));
+        }
       } else {
         toast.error(res.error || "Failed to save settings.");
       }
+
     } catch {
       toast.error("Error saving settings.");
     } finally {
@@ -196,7 +213,7 @@ function AdminPage() {
     setTestingGroq(true);
     try {
       const res = await testApiKeyFn({
-        data: { provider: "groq", apiKey: groqKey.trim() },
+        data: { provider: "groq", apiKey: groqKey.trim(), passcode },
       });
       if (res.success) toast.success(res.message);
       else toast.error(res.message);
@@ -215,7 +232,7 @@ function AdminPage() {
     setTestingCerebras(true);
     try {
       const res = await testApiKeyFn({
-        data: { provider: "cerebras", apiKey: cerebrasKey.trim() },
+        data: { provider: "cerebras", apiKey: cerebrasKey.trim(), passcode },
       });
       if (res.success) toast.success(res.message);
       else toast.error(res.message);
@@ -223,6 +240,25 @@ function AdminPage() {
       toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setTestingCerebras(false);
+    }
+  };
+
+  const handleTestQwen = async () => {
+    if (!qwenKey.trim()) {
+      toast.error("Please enter a Qwen / Alibaba DashScope API key to test.");
+      return;
+    }
+    setTestingQwen(true);
+    try {
+      const res = await testApiKeyFn({
+        data: { provider: "qwen", apiKey: qwenKey.trim(), passcode },
+      });
+      if (res.success) toast.success(res.message);
+      else toast.error(res.message);
+    } catch (e) {
+      toast.error(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTestingQwen(false);
     }
   };
 
@@ -234,7 +270,7 @@ function AdminPage() {
     setTestingOpenRouter(true);
     try {
       const res = await testApiKeyFn({
-        data: { provider: "openrouter", apiKey: openrouterKey.trim() },
+        data: { provider: "openrouter", apiKey: openrouterKey.trim(), passcode },
       });
       if (res.success) toast.success(res.message);
       else toast.error(res.message);
@@ -256,6 +292,7 @@ function AdminPage() {
         data: {
           provider: "nvidia",
           apiKey: nvidiaKey.trim(),
+          passcode,
         },
       });
       if (res.success) {
@@ -282,6 +319,7 @@ function AdminPage() {
         data: {
           provider: "gemini",
           apiKey: geminiKey.trim(),
+          passcode,
         },
       });
       if (res.success) {
@@ -302,7 +340,7 @@ function AdminPage() {
       return;
     }
     try {
-      const res = await deleteAnalysisMongoFn({ data: { id } });
+      const res = await deleteAnalysisMongoFn({ data: { id, passcode } });
       if (res.success) {
         setAnalyses((prev) => prev.filter((a) => a.id !== id));
         toast.success(`Deleted record for ${name}.`);
@@ -323,10 +361,12 @@ function AdminPage() {
       return;
     }
     try {
-      const res = await clearAnalysesMongoFn({ data: { adminPass: passcode } });
+      const res = await clearAnalysesMongoFn({ data: { passcode } });
       if (res.success) {
         setAnalyses([]);
         toast.success("All candidate records cleared from MongoDB.");
+      } else {
+        toast.error(res.error || "Failed to clear records.");
       }
     } catch {
       toast.error("Failed to clear records.");
@@ -500,7 +540,148 @@ function AdminPage() {
           </div>
         </section>
 
-        {/* Section 2: Secure API Key Vault */}
+        {/* Section 2: Authoritative Model & Multi-Provider Failover */}
+        <section className="rounded-2xl border border-primary/30 bg-card p-6 shadow-sm space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1 max-w-2xl">
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                  <Lock className="size-4" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">
+                  Authoritative AI Screening Model (Admin Only)
+                </h2>
+                <Badge variant="default" className="text-[10px] font-semibold bg-primary text-primary-foreground">
+                  System-Wide Master
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Model selection is strictly controlled in this Admin Portal. All candidates and batch runs across the platform will be evaluated using your selected model below.
+              </p>
+            </div>
+
+            <Button
+              onClick={() => void handleSaveSettings()}
+              disabled={savingSettings}
+              className="text-xs font-semibold h-9 shrink-0 shadow-sm"
+            >
+              {savingSettings ? (
+                <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Check className="size-3.5 mr-1.5" />
+              )}
+              Save Model &amp; System Settings
+            </Button>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-3 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="def-model" className="text-xs font-bold text-foreground flex items-center justify-between">
+                <span>Active Primary Screening Model</span>
+                <span className="text-[10px] text-primary font-mono font-semibold">MongoDB Atlas</span>
+              </Label>
+              <Select value={defaultModelId} onValueChange={setDefaultModelId}>
+                <SelectTrigger id="def-model" className="text-xs font-medium border-primary/40 bg-secondary/30">
+                  <SelectValue placeholder="Select default model" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {(Object.keys(modelsByProvider()) as ProviderId[]).map((prov) => {
+                    const list = modelsByProvider()[prov];
+                    if (!list.length) return null;
+                    return (
+                      <SelectGroup key={prov}>
+                        <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          {PROVIDER_LABEL[prov]}
+                        </SelectLabel>
+                        {list.map((m) => (
+                          <SelectItem key={m.id} value={m.id} className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <span>{m.label}</span>
+                              {m.tag && (
+                                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-medium">
+                                  {m.tag}
+                                </Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="def-role" className="text-xs font-bold text-foreground">
+                Default Screening Role (When no JD provided)
+              </Label>
+              <Input
+                id="def-role"
+                value={defaultRole}
+                placeholder="Software Engineer (Entry Level)"
+                onChange={(e) => setDefaultRole(e.target.value)}
+                className="text-xs bg-secondary/20"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="def-company" className="text-xs font-bold text-foreground">
+                Default Hiring Company Name
+              </Label>
+              <Input
+                id="def-company"
+                value={companyName}
+                placeholder="the hiring company"
+                onChange={(e) => setCompanyName(e.target.value)}
+                className="text-xs bg-secondary/20"
+              />
+            </div>
+          </div>
+
+          {/* Automatic Multi-Provider Failover Status Banner */}
+          <div className="rounded-xl border border-border/80 bg-secondary/20 p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold flex items-center gap-1.5 text-foreground">
+                <Zap className="size-3.5 text-warning" /> Automatic Multi-Provider Rate Limit Failover
+              </span>
+              <Badge variant="outline" className="border-success/40 bg-success/10 text-success text-[10px] font-semibold">
+                Cascade Hot-Standby Active
+              </Badge>
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              If the primary model hits an API rate limit (HTTP 429 / 503 or quota ceiling) during 50-resume parallel screening, the engine automatically cascades to the next available provider with a valid key in the vault without failing the analysis:
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${qwenKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${qwenKey ? "bg-success" : "bg-muted-foreground"}`} />
+                Qwen DashScope {qwenKey ? "(Ready)" : "(No Key)"}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${cerebrasKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${cerebrasKey ? "bg-success" : "bg-muted-foreground"}`} />
+                Cerebras Wafer-Scale {cerebrasKey ? "(Ready)" : "(No Key)"}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${groqKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${groqKey ? "bg-success" : "bg-muted-foreground"}`} />
+                Groq Cloud LPU {groqKey ? "(Ready)" : "(No Key)"}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${geminiKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${geminiKey ? "bg-success" : "bg-muted-foreground"}`} />
+                Google Gemini {geminiKey ? "(Ready)" : "(No Key)"}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${openrouterKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${openrouterKey ? "bg-success" : "bg-muted-foreground"}`} />
+                OpenRouter :free {openrouterKey ? "(Ready)" : "(No Key)"}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${nvidiaKey ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground opacity-60"}`}>
+                <span className={`size-1.5 rounded-full ${nvidiaKey ? "bg-success" : "bg-muted-foreground"}`} />
+                NVIDIA NIM {nvidiaKey ? "(Ready)" : "(No Key)"}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 3: Secure API Key Vault */}
         <section className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-5">
           <div>
             <h2 className="text-sm font-bold flex items-center gap-2">
@@ -514,6 +695,65 @@ function AdminPage() {
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
+            {/* Qwen / Alibaba DashScope */}
+            <div className="space-y-2">
+              <Label htmlFor="qwen-key" className="text-xs flex items-center justify-between">
+                <span>🌟 Qwen Cloud API Key (home.qwencloud.com/benefits)</span>
+                {qwenKey && (
+                  <span className="text-[10px] text-success font-semibold">Active in MongoDB</span>
+                )}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="qwen-key"
+                  type={showKey ? "text" : "password"}
+                  value={qwenKey}
+                  placeholder="sk-..."
+                  onChange={(e) => setQwenKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowKey((v) => !v)}
+                  className="shrink-0"
+                  aria-label={showKey ? "Hide API Key" : "Show API Key"}
+                >
+                  {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleTestQwen()}
+                  disabled={testingQwen || !qwenKey.trim()}
+                  className="shrink-0 text-xs px-2.5 h-9"
+                  title="Test Qwen Cloud connection"
+                >
+                  {testingQwen ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5 mr-1 text-primary" />
+                  )}
+                  Test
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground flex items-center justify-between">
+                <span>
+                  Claim free 1M–2M tokens benefits at{" "}
+                  <a
+                    href="https://home.qwencloud.com/benefits"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary font-semibold underline hover:text-primary/80"
+                  >
+                    home.qwencloud.com/benefits
+                  </a>
+                </span>
+              </p>
+            </div>
+
             {/* Groq Cloud */}
             <div className="space-y-2">
               <Label htmlFor="groq-key" className="text-xs flex items-center justify-between">
@@ -720,63 +960,6 @@ function AdminPage() {
             </div>
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-3 pt-2 border-t border-border/60">
-            <div className="space-y-2">
-              <Label htmlFor="def-model" className="text-xs">
-                Default Screening Model (MongoDB)
-              </Label>
-              <Select value={defaultModelId} onValueChange={setDefaultModelId}>
-                <SelectTrigger id="def-model" className="text-xs">
-                  <SelectValue placeholder="Select default model" />
-                </SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {(Object.keys(modelsByProvider()) as ProviderId[]).map((prov) => {
-                    const list = modelsByProvider()[prov];
-                    if (!list.length) return null;
-                    return (
-                      <SelectGroup key={prov}>
-                        <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                          {PROVIDER_LABEL[prov]}
-                        </SelectLabel>
-                        {list.map((m) => (
-                          <SelectItem key={m.id} value={m.id} className="text-xs">
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="def-role" className="text-xs">
-                Default Screening Role (No JD)
-              </Label>
-              <Input
-                id="def-role"
-                value={defaultRole}
-                placeholder="Software Engineer (Entry Level)"
-                onChange={(e) => setDefaultRole(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="def-company" className="text-xs">
-                Default Hiring Company
-              </Label>
-              <Input
-                id="def-company"
-                value={companyName}
-                placeholder="the hiring company"
-                onChange={(e) => setCompanyName(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-          </div>
-
           <div className="flex justify-end pt-2">
             <Button
               onClick={() => void handleSaveSettings()}
@@ -792,6 +975,7 @@ function AdminPage() {
             </Button>
           </div>
         </section>
+
 
         {/* Section 3: MongoDB Candidate Records Manager */}
         <section className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">

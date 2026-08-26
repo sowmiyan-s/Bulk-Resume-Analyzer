@@ -44,7 +44,7 @@ export type LlmSettings = {
 };
 
 export const DEFAULT_SETTINGS: LlmSettings = {
-  modelId: "meta/llama-3.3-70b-instruct",
+  modelId: "qwen-plus",
   apiKey: "",
   proxyUrl: "",
   customBaseUrl: "",
@@ -69,29 +69,35 @@ export class LlmError extends Error {
 
 /* ------------------------------- prompting ------------------------------- */
 
+/* ------------------------------- prompting ------------------------------- */
+
 const SYSTEM_PROMPT =
-  "You are an objective Principal Engineering Director and Senior Technical Recruiter. " +
-  "You evaluate software and tech resumes using a comprehensive, balanced industry-standard technical benchmark. " +
-  "HOLISTIC TECHNICAL BENCHMARK CRITERIA: " +
-  "1. Technical Stack Depth (35 pts max): Depth across languages, backend/frontend frameworks, databases, cloud, system architecture, and modern developer tooling. " +
-  "2. Project Architecture & Complexity (35 pts max): Non-trivial technical projects showing real problem solving, data flow, APIs, and functional execution beyond simple tutorials. " +
-  "3. Practical Experience & Verifiable Proof (20 pts max): Internships, real client work, open source, hackathons, publications, or demonstrable user adoption. " +
-  "4. ATS Modern Structure (10 pts max): Clean 1-page layout for entry-level/students, standard section headings, clear contact links, and absence of outdated photos or declaration blocks. " +
+  "You are an expert Senior Director of Technical Recruiting and Principal Systems Architect. " +
+  "You perform authentic, rigorous, evidence-based resume audits for campus placement and engineering roles. " +
+  "CRITICAL RULES: NO RANDOM ANALYSIS. NO DUMMY FILLER TEXT. NO FABRICATED PRAISE. " +
+  "Every critique, score, and recommendation must cite verbatim evidence from the candidate's resume and measure direct alignment with the target Job Description (or target role). " +
+  "SECTION-BY-SECTION EVALUATION BENCHMARK (100 PTS TOTAL): " +
+  "1. Technical Skills Depth & Stack (25 pts max): Depth of programming languages, modern frameworks, databases, cloud, system architecture, and modern developer tooling. " +
+  "2. Project Complexity & Architecture (25 pts max): Non-trivial technical projects showing real problem solving, data flow, APIs, database schema, and functional execution beyond basic tutorials. " +
+  "3. Internships & Practical Experience (20 pts max): Hands-on industry experience, quantifiable production contributions, and STRICT RELEVANCE to the Job Description requirements. " +
+  "4. Professional Summary & Positioning (10 pts max): Concise, high-impact career positioning without generic clichés ('hardworking', 'passionate'). " +
+  "5. Verified Certifications & Accreditations (10 pts max): Recognizable cloud/vendor accreditations (AWS, GCP, Azure, Oracle, Cisco, Kubernetes, etc.) vs unverified completion certificates. " +
+  "6. Achievements & Verifiable Proof (10 pts max): Hackathons, competitive programming ratings (LeetCode/Codeforces), open-source PRs, tech publications, and demonstrable awards. " +
   "Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
 
-/** Compact key list. Deliberately no sample JSON — that alone saves ~400 input tokens. */
+/** Compact key list for authentic section-by-section analysis without filler. */
 const SCHEMA_SPEC = `Keys (all required, all strings/arrays/objects as typed):
 candidate_name:string (from resume, else "Unnamed candidate")
 role:string (the target role inferred or specified)
 assumed_role:string (the role evaluated against)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
-overall_score:int 0-100 (BALANCED BENCHMARK SCORE: Sum of the 4 breakdown categories below)
+overall_score:int 0-100 (Sum of the 6 section scores: Skills 25 + Projects 25 + Internships 20 + Summary 10 + Certs 10 + Achievements 10 = 100 max)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
-score_breakdown:[{category:"Technical Stack & Skill Depth"|"Project Architecture & Complexity"|"Practical Experience & Track Record"|"ATS Format & Section Structure",score:int,max:int,note:string}] exactly 4 rows with maxes: 35, 35, 20, 10 (sum to 100)
+score_breakdown:[{category:"Technical Skills Depth & Stack"|"Project Complexity & Architecture"|"Internships & Practical Track Record (JD-Aligned)"|"Professional Summary & Career Positioning"|"Verified Certifications & Accreditations"|"Achievements, Hackathons & Verifiable Proof",score:int,max:int,note:string}] exactly 6 rows with maxes: 25, 25, 20, 10, 10, 10 (sum to 100)
 jd_match:{score:int 0-100,verdict:string} (required: calculate overall 0-100 percentage match against the target Job Description or target role, with concise verdict)
-recruiter_first_impression:string (<=35 words: objective technical assessment based on overall competencies)
-hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on demonstrated skills)
-strengths:[string] max 3 (top technical competencies, e.g. 'Strong backend with FastAPI & Docker', 'Multi-agent AI implementation')
+recruiter_first_impression:string (<=35 words: objective technical assessment based on demonstrated competencies)
+hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on verified skills)
+strengths:[string] max 3 (top technical competencies, e.g. 'Production backend with FastAPI & Docker', 'Multi-agent AI implementation')
 critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 1-4 items of real technical gaps, missing requirements, or anti-patterns (use "critical" for major red flags, "major" for important gaps, "minor" for small polish). Return [] only if resume has no issues.
 grammar_and_ocr_errors:[string] 0-2 items. ONLY genuine unreadable OCR glitches. Return [] if readable.
 formatting_problems:[string] 0-2 items. Genuine ATS blockers (e.g. 2 pages when 1 is appropriate for student, embedded photo, obsolete declaration). Return [] if clean.
@@ -101,14 +107,17 @@ tech_improvement_ideas:[string] max 4 (concrete tools/frameworks that would elev
 project_suggestions:[string] max 2 (concrete engineering project ideas with clear architecture that solve their biggest skill gaps)
 structure:{score:int 0-100,label:string ("Excellent"|"Good"|"Needs work"|"Poor"),notes:[string] max 3}
 data_gaps:[{area,missing,impact}] max 3 (missing GitHub/live demo links, missing stack details)
-relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}`;
+relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}
+section_audits:{summary:{score:int 0-10,audit:string,fix_tip:string},skills:{score:int 0-25,matched_keywords:[string],missing_critical_skills:[string],audit:string,fix_tip:string},projects:{score:int 0-25,architecture_rating:string,live_proof:bool,audit:string,fix_tip:string},internships:{score:int 0-20,jd_relevance_pct:int 0-100,jd_relevance_explanation:string,audit:string,fix_tip:string},certifications:{score:int 0-10,verified_count:int,audit:string,fix_tip:string},achievements:{score:int 0-10,audit:string,fix_tip:string}}
+section_improvements:[{section:string,current_gap:string,actionable_fix:string}] 3-5 concrete step-by-step section improvements
+placement_tips:[string] 3-4 tactical interview & placement tips tailored specifically to this candidate's resume gaps`;
 
 const RULES = `Professional Evaluation & Scoring Standards:
 1. GRANULAR FULL-SPECTRUM SCORING (0-100 CONTINUOUS DISTRIBUTION):
-   - Score candidates dynamically and realistically across the entire 0-100 spectrum. DO NOT default to clustered numbers (e.g. 92, 82, 72, 62) or multiples of 5/10. Use exact, authentic component points (e.g. 33/35, 27/35, 14/20, 8/10 -> 82, or 29+26+13+7 -> 75, 23+19+8+5 -> 55, 16+11+6+4 -> 37, 7+5+2+2 -> 16, etc.).
-   - Calibrate across the 10 standard evaluation categories:
-     * 90–100 (Exceptional): Production-level architecture, deep modern stack, verifiable proof, clean ATS 1-page layout.
-     * 80–89 (High Match): Solid technical depth, full-stack or systems projects, internships/proof, clean format.
+   - Score candidates dynamically and realistically across the entire 0-100 spectrum based on the 6 sections. DO NOT default to clustered numbers (e.g. 92, 82, 72, 62) or multiples of 5/10. Use exact component points (e.g. 22/25, 21/25, 16/20, 8/10, 7/10, 8/10 -> 82).
+   - Calibrate across the standard evaluation categories:
+     * 90–100 (Exceptional): Production-level architecture, deep modern stack, verifiable internships/proof, clean ATS layout.
+     * 80–89 (High Match): Solid technical depth, full-stack or systems projects, relevant internships, clean format.
      * 70–79 (Good / Polish): Solid foundation and functional projects, but lacks complex architecture or cloud deployment.
      * 60–69 (Moderate): Basic tutorial-level projects, limited backend/systems depth, minor formatting gaps.
      * 50–59 (Basic Foundation): Junior coursework foundation, superficial skills, missing project implementation.
@@ -118,14 +127,13 @@ const RULES = `Professional Evaluation & Scoring Standards:
      * 10–19 (Very Weak): Severe lack of basic technical knowledge, major ATS red flags.
      * Below 10 (<10): Blank, corrupted, or completely irrelevant resume.
 
-2. ATS MODERNITY & DOCUMENT STATS:
-   - Check the [DOCUMENT METRICS] header: A 1-page resume is optimal for students/entry-level (score 8-10/10). A 2-page resume with photos and declaration blocks should be noted constructively (score 4-6/10).
+2. STRICT INTERNSHIP & JD RELEVANCE:
+   - When a Job Description is given, rigorously measure how the candidate's past internships, responsibilities, and projects directly align with the requirements of the JD.
+   - Calculate an explicit jd_relevance_pct (0-100%) and provide a concise explanation of what overlaps and what is missing.
 
-3. GENDER EQUALITY & FAIRNESS:
-   - Provide completely neutral, unbiased scoring based 100% on demonstrable technical evidence and project merit.
+3. NO DUMMY CRITIQUES & NO FILLER TEXT:
+   - Never manufacture imaginary typos, filler compliments, or fake flaws. Every critique must cite direct evidence from the resume text. Return [] if clean.`;
 
-4. NO DUMMY CRITIQUES:
-   - Never manufacture imaginary typos or flaws. Return [] if sections are clean.`;
 
 export function buildMessages(input: {
   fileName: string;
@@ -216,15 +224,46 @@ export function extractJson(raw: string): unknown {
   try {
     return JSON.parse(slice);
   } catch {
-    // Last-ditch repairs: trailing commas, and an object truncated by max_tokens.
-    const repaired = slice.replace(/,\s*([}\]])/g, "$1");
+    // Robust salvage for truncated model outputs
+    let salvaged = slice.replace(/,\s*([}\]])/g, "$1");
+    salvaged = salvaged.replace(/,\s*"[^"]*"?\s*:?\s*[^,}\]]*$/, "");
+    salvaged = salvaged.replace(/,\s*$/, "");
+
+    let openBraces = 0;
+    let openBrackets = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < salvaged.length; i++) {
+      const ch = salvaged[i]!;
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "{") openBraces++;
+      else if (ch === "}") openBraces = Math.max(0, openBraces - 1);
+      else if (ch === "[") openBrackets++;
+      else if (ch === "]") openBrackets = Math.max(0, openBrackets - 1);
+    }
+
+    const autoClose = "]".repeat(openBrackets) + "}".repeat(openBraces);
     try {
-      return JSON.parse(repaired);
+      return JSON.parse(salvaged + autoClose);
     } catch {
-      const salvaged = repaired.replace(/,\s*"[^"]*"\s*:\s*[^,}\]]*$/, "");
-      const closes = (salvaged.match(/\{/g)?.length ?? 0) - (salvaged.match(/\}/g)?.length ?? 0);
+      const stripped = salvaged.replace(/\{[^{}]*$/, "").replace(/,\s*$/, "");
+      const ob = (stripped.match(/\{/g)?.length ?? 0) - (stripped.match(/\}/g)?.length ?? 0);
+      const obk = (stripped.match(/\[/g)?.length ?? 0) - (stripped.match(/\]/g)?.length ?? 0);
       try {
-        return JSON.parse(salvaged + "]".repeat(0) + "}".repeat(Math.max(0, closes)));
+        return JSON.parse(stripped + "]".repeat(Math.max(0, obk)) + "}".repeat(Math.max(0, ob)));
       } catch {
         throw new LlmError(
           "Could not parse the model's JSON (likely truncated — raise Max tokens).",

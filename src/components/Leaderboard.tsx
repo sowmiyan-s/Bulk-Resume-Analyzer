@@ -1,9 +1,23 @@
 import { useMemo, useState } from "react";
-import { Award, ChevronDown, ChevronUp, Filter, RefreshCw, Trash2, Trophy } from "lucide-react";
+import {
+  Award,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  RefreshCw,
+  Sliders,
+  Sparkles,
+  Target,
+  Trash2,
+  Trophy,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
   Table,
   TableBody,
@@ -52,18 +66,29 @@ export function Leaderboard({
   onDelete,
   onReevaluate,
   hasActiveJd,
+  shortlistCutoff = 75,
+  onShortlistCutoffChange,
 }: {
   rows: LeaderRow[];
   onOpen: (id: string) => void;
   onDelete?: (id: string) => void;
   onReevaluate?: (id: string) => void;
   hasActiveJd?: boolean;
+  shortlistCutoff?: number;
+  onShortlistCutoffChange?: (val: number) => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [scoreFilter, setScoreFilter] = useState<ScoreCategoryId>("all");
+  const [onlyShortlisted, setOnlyShortlisted] = useState(false);
+
+  const cutoff = shortlistCutoff ?? 75;
+
+  const shortlistedCount = useMemo(() => {
+    return rows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
+  }, [rows, cutoff]);
 
   const tierCounts = useMemo(
     () => ({
@@ -91,13 +116,16 @@ export function Leaderboard({
     const q = query.trim().toLowerCase();
     const list = rows.filter((r) => {
       if (!r || !r.analysis) return false;
+      const score = effectiveScore(r.analysis);
+
+      if (onlyShortlisted && score < cutoff) return false;
+
       const tier = r.analysis.readinessTier || "";
       if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
 
       if (scoreFilter !== "all") {
         const cat = SCORE_CATEGORIES.find((c) => c.id === scoreFilter);
         if (cat) {
-          const score = effectiveScore(r.analysis);
           if (score < cat.min || score > cat.max) return false;
         }
       }
@@ -111,6 +139,7 @@ export function Leaderboard({
         (r.fileName || "").toLowerCase().includes(q)
       );
     });
+
 
     const dir = asc ? 1 : -1;
     const cmp: Record<SortKey, (a: LeaderRow, b: LeaderRow) => number> = {
@@ -241,6 +270,67 @@ export function Leaderboard({
         </div>
       </div>
 
+      {/* Shortlist % Cutoff Controller Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <Target className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-xs font-bold text-foreground">Shortlist Threshold:</span>
+            <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              ≥ {cutoff}%
+            </span>
+          </div>
+
+          {/* Quick Cutoff Preset Buttons */}
+          <div className="flex items-center gap-1">
+            {[60, 70, 75, 80, 85, 90].map((p) => (
+              <Button
+                key={p}
+                size="sm"
+                variant={cutoff === p ? "default" : "outline"}
+                className={`h-6 px-2 text-[11px] font-semibold rounded-md ${
+                  cutoff === p
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"
+                    : "bg-card/80 text-muted-foreground hover:text-foreground border-border/80"
+                }`}
+                onClick={() => onShortlistCutoffChange?.(p)}
+              >
+                {p}%
+              </Button>
+            ))}
+          </div>
+
+          {onShortlistCutoffChange && (
+            <div className="w-28 hidden sm:block">
+              <Slider
+                value={[cutoff]}
+                min={40}
+                max={95}
+                step={5}
+                onValueChange={([v]) => onShortlistCutoffChange(v ?? 75)}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Shortlist Filter Toggle & Live Counter */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={onlyShortlisted ? "default" : "outline"}
+            className={`h-7 text-xs font-bold rounded-lg transition-all ${
+              onlyShortlisted
+                ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
+                : "bg-card hover:bg-secondary text-foreground border-emerald-500/40"
+            }`}
+            onClick={() => setOnlyShortlisted((prev) => !prev)}
+          >
+            <CheckCircle2 className="size-3.5 mr-1 text-emerald-400" />
+            {onlyShortlisted ? "Showing Shortlisted" : "Filter Shortlisted Only"} ({shortlistedCount} / {rows.length})
+          </Button>
+        </div>
+      </div>
+
       {scoreFilter !== "all" && (
         <div className="flex items-center gap-2 px-1 text-xs">
           <span className="text-muted-foreground">Filtered by:</span>
@@ -280,7 +370,7 @@ export function Leaderboard({
                   Score
                 </Th>
                 <Th k="tier" className="w-32">
-                  Readiness
+                  Readiness / Status
                 </Th>
                 <Th k="structure" className="w-24">
                   Structure
@@ -310,12 +400,17 @@ export function Leaderboard({
               {sorted.map((row, index) => {
                 const a = row.analysis;
                 const score = effectiveScore(a);
+                const isShortlisted = score >= cutoff;
                 const totalIssues = (a.criticalIssues || []).length;
                 const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
                 return (
                   <TableRow
                     key={row.id}
-                    className="cursor-pointer transition-colors hover:bg-secondary/50"
+                    className={`cursor-pointer transition-all ${
+                      isShortlisted
+                        ? "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 hover:bg-emerald-500/15"
+                        : "hover:bg-secondary/50"
+                    }`}
                     onClick={() => onOpen(row.id)}
                   >
                     <TableCell>
@@ -330,9 +425,19 @@ export function Leaderboard({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <p className="max-w-[16rem] truncate text-xs font-semibold text-foreground">
-                        {a.candidateName}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="max-w-[16rem] truncate text-xs font-semibold text-foreground">
+                          {a.candidateName}
+                        </p>
+                        {isShortlisted && (
+                          <span
+                            className="inline-flex items-center text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20"
+                            title={`Score ${score}% meets threshold ${cutoff}%`}
+                          >
+                            🎯 Shortlist
+                          </span>
+                        )}
+                      </div>
                       <p className="max-w-[16rem] truncate text-xs text-muted-foreground mt-0.5">
                         {a.role}
                         <span className="opacity-60">
@@ -346,7 +451,11 @@ export function Leaderboard({
                         const cat = getScoreCategory(score);
                         return (
                           <span
-                            className={`inline-flex items-center justify-center rounded-md px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`}
+                            className={`inline-flex items-center justify-center rounded-md px-2.5 py-0.5 font-mono text-xs font-bold border transition-colors ${
+                              isShortlisted
+                                ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/40 shadow-xs"
+                                : `${cat.badgeBg} ${cat.badgeText} ${cat.badgeBorder}`
+                            }`}
                             title={`${cat.label} — ${cat.description}`}
                           >
                             {score}
@@ -449,6 +558,7 @@ export function Leaderboard({
             </TableBody>
           </Table>
         </div>
+
       </div>
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

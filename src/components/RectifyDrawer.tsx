@@ -2,16 +2,23 @@ import { useEffect, useState, useTransition } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  Award,
+  BookOpen,
+  Briefcase,
   Check,
   CheckCircle2,
+  Code2,
   Copy,
   FileDown,
+  FileText,
+  GraduationCap,
   Layers,
   Lightbulb,
   RefreshCw,
   Sparkles,
   Target,
   Trash2,
+  TrendingUp,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -29,8 +36,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Analysis, Issue } from "@/lib/analysis-types";
-import { effectiveScore } from "@/lib/analysis-types";
+import { effectiveScore, tierTone, type Analysis, type Issue } from "@/lib/analysis-types";
 import type { TextFix } from "@/lib/sanitize";
 import { ScoreRing } from "./ScoreRing";
 
@@ -59,16 +65,7 @@ type Props = {
   onReanalyzeWithJd?: (id: string) => void;
 };
 
-function tierTone(tier: string) {
-  const t = tier.toLowerCase();
-  if (t.includes("tier 1") || t.includes("shortlist")) {
-    return "border-success/40 bg-success/10 text-success";
-  }
-  if (t.includes("tier 2") || t.includes("polish") || t.includes("minor")) {
-    return "border-warning/40 bg-warning/10 text-warning";
-  }
-  return "border-destructive/40 bg-destructive/10 text-destructive";
-}
+
 
 function sevTone(s: Issue["severity"]) {
   if (s === "critical") return "border-destructive/40 bg-destructive/10 text-destructive";
@@ -132,13 +129,13 @@ export function RectifyDrawer({
     toast.success("Copied to clipboard!");
   };
 
-  const criticalCount = a.criticalIssues.filter((i) => i.severity === "critical").length;
+  const sec = a.sectionAudits;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 border-l border-border bg-card p-0 sm:max-w-[min(96vw,980px)] shadow-2xl"
+        className="flex w-full flex-col gap-0 border-l border-border bg-card p-0 sm:max-w-[min(96vw,1020px)] shadow-2xl"
       >
         {/* Fixed Header */}
         <SheetHeader className="border-b border-border bg-secondary/30 px-6 py-4 shrink-0">
@@ -149,53 +146,42 @@ export function RectifyDrawer({
                 label={a.manualScore !== null ? "OVERRIDE" : "SCORE"}
                 size={64}
               />
-              <div className="min-w-0">
-                <SheetTitle className="truncate text-lg font-bold tracking-tight text-foreground">
-                  {a.candidateName}
-                </SheetTitle>
-                <SheetDescription className="truncate text-xs font-medium text-muted-foreground mt-0.5">
-                  {a.role} <span className="opacity-60">· {target.fileName}</span>
-                </SheetDescription>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SheetTitle className="text-lg font-bold text-foreground">
+                    {a.candidateName}
+                  </SheetTitle>
                   <Badge
                     variant="outline"
-                    className={`text-xs font-semibold rounded-md ${tierTone(a.readinessTier)}`}
+                    className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${tierTone(
+                      a.readinessTier,
+                    )}`}
                   >
                     {a.readinessTier}
                   </Badge>
                   {a.jdScore !== null && (
                     <Badge
                       variant="outline"
-                      className="border-primary/30 bg-primary/10 text-xs font-semibold text-primary"
+                      className="border-primary/40 bg-primary/10 text-primary text-xs font-semibold px-2.5 py-0.5 rounded-full"
                     >
-                      JD Match: {a.jdScore}%
-                    </Badge>
-                  )}
-                  {criticalCount > 0 ? (
-                    <Badge
-                      variant="outline"
-                      className="border-destructive/30 bg-destructive/10 text-xs font-semibold text-destructive"
-                    >
-                      {criticalCount} Critical Flag{criticalCount > 1 ? "s" : ""}
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="border-success/30 bg-success/10 text-xs font-semibold text-success"
-                    >
-                      0 Critical Issues
+                      🎯 {a.jdScore}% JD Match
                     </Badge>
                   )}
                 </div>
+                <SheetDescription className="text-xs text-muted-foreground">
+                  Target: <span className="font-semibold text-foreground">{a.role}</span> · File:{" "}
+                  <span className="font-mono text-muted-foreground">{target.fileName}</span>
+                </SheetDescription>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Actions */}
+            <div className="flex items-center gap-2">
               {hasActiveJd && onReanalyzeWithJd ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs font-medium rounded-lg border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
+                  className="h-8 text-xs font-medium rounded-lg border-primary/40 text-primary hover:bg-primary/10"
                   onClick={() => onReanalyzeWithJd(target.id)}
                   title="Re-evaluate candidate against currently entered Job Description"
                 >
@@ -236,7 +222,7 @@ export function RectifyDrawer({
         </SheetHeader>
 
         {/* Unified Smooth Scroll Container with Sticky Tabs */}
-        <Tabs defaultValue="issues" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <Tabs defaultValue="sections" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
             {/* Top Executive Summary */}
             <div className="border-b border-border bg-background p-6 space-y-4">
@@ -274,7 +260,7 @@ export function RectifyDrawer({
                 {/* Right Column: Score Breakdown */}
                 <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3 lg:col-span-5">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Competency Score Breakdown
+                    Section Competency Breakdown
                   </p>
                   <div className="space-y-3">
                     {a.scoreBreakdown.map((row, i) => {
@@ -302,11 +288,6 @@ export function RectifyDrawer({
                               style={{ width: `${Math.max(4, pct)}%` }}
                             />
                           </div>
-                          {row.note && (
-                            <p className="text-[11px] text-muted-foreground leading-tight">
-                              {row.note}
-                            </p>
-                          )}
                         </div>
                       );
                     })}
@@ -317,7 +298,28 @@ export function RectifyDrawer({
 
             {/* Sticky Tab Navigation Bar */}
             <div className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur px-6 py-2">
-              <TabsList className="h-9 gap-1.5 bg-secondary/40 p-1 rounded-xl">
+              <TabsList className="h-9 gap-1 bg-secondary/40 p-1 rounded-xl flex-wrap">
+                <TabsTrigger
+                  value="sections"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                >
+                  <FileText className="size-3.5 mr-1.5 text-primary" />
+                  Section-by-Section Audit
+                </TabsTrigger>
+                <TabsTrigger
+                  value="roadmap"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                >
+                  <Lightbulb className="size-3.5 mr-1.5 text-accent" />
+                  Actionable Roadmap &amp; Tips
+                </TabsTrigger>
+                <TabsTrigger
+                  value="rewrites"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                >
+                  <Sparkles className="size-3.5 mr-1.5 text-success" />
+                  Bullet Rewrites ({a.bulletRewrites.length})
+                </TabsTrigger>
                 <TabsTrigger
                   value="issues"
                   className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
@@ -330,21 +332,7 @@ export function RectifyDrawer({
                   className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
                 >
                   <Layers className="size-3.5 mr-1.5 text-primary" />
-                  Skills &amp; Gaps
-                </TabsTrigger>
-                <TabsTrigger
-                  value="rewrites"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
-                >
-                  <Sparkles className="size-3.5 mr-1.5 text-success" />
-                  Bullet Rewrites ({a.bulletRewrites.length})
-                </TabsTrigger>
-                <TabsTrigger
-                  value="roadmap"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
-                >
-                  <Lightbulb className="size-3.5 mr-1.5 text-accent" />
-                  Growth Roadmap
+                  Skills Matrix
                 </TabsTrigger>
                 <TabsTrigger
                   value="strengths"
@@ -358,6 +346,389 @@ export function RectifyDrawer({
 
             {/* Tab Contents Area */}
             <div className="p-6">
+              {/* Tab: Section-by-Section Real Audit */}
+              <TabsContent value="sections" className="mt-0 space-y-4">
+                <div className="space-y-4">
+                  {/* 1. Professional Summary */}
+                  {sec?.summary && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            1. Professional Summary &amp; Career Positioning
+                          </h4>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.summary.score} / {sec.summary.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.summary.audit}
+                      </p>
+                      {sec.summary.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Improvement Tip:</strong>{" "}
+                            {sec.summary.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 2. Technical Skills */}
+                  {sec?.skills && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Code2 className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            2. Technical Skills &amp; Stack Depth
+                          </h4>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.skills.score} / {sec.skills.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.skills.audit}
+                      </p>
+                      {sec.skills.matchedKeywords && sec.skills.matchedKeywords.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-muted-foreground mr-1">
+                            Verified Skills:
+                          </span>
+                          {sec.skills.matchedKeywords.map((k, i) => (
+                            <Badge
+                              key={i}
+                              variant="outline"
+                              className="text-[11px] bg-success/10 text-success border-success/30 px-2 py-0.2"
+                            >
+                              {k}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {sec.skills.missingCriticalSkills && sec.skills.missingCriticalSkills.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-destructive mr-1">
+                            Missing Requirements:
+                          </span>
+                          {sec.skills.missingCriticalSkills.map((k, i) => (
+                            <Badge
+                              key={i}
+                              variant="outline"
+                              className="text-[11px] bg-destructive/10 text-destructive border-destructive/30 px-2 py-0.2"
+                            >
+                              {k}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {sec.skills.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Skills Action:</strong>{" "}
+                            {sec.skills.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3. Project Work */}
+                  {sec?.projects && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wrench className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            3. Project Complexity &amp; Architecture
+                          </h4>
+                          {sec.projects.architectureRating && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] bg-primary/10 text-primary border-primary/30"
+                            >
+                              {sec.projects.architectureRating}
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.projects.score} / {sec.projects.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.projects.audit}
+                      </p>
+                      {sec.projects.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Project Enhancement:</strong>{" "}
+                            {sec.projects.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 4. Internships & Practical Experience (JD Relevance) */}
+                  {sec?.internships && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            4. Internships &amp; Practical Experience (JD Relevance)
+                          </h4>
+                          <span
+                            className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                              sec.internships.jdRelevancePct >= 75
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                : sec.internships.jdRelevancePct >= 50
+                                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                  : "bg-red-500/15 text-red-500 border-red-500/30"
+                            }`}
+                          >
+                            🎯 {sec.internships.jdRelevancePct}% JD Relevance
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.internships.score} / {sec.internships.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.internships.audit}
+                      </p>
+                      {sec.internships.jdRelevanceExplanation && (
+                        <div className="text-xs bg-accent/10 border border-accent/30 p-2.5 rounded-lg text-foreground">
+                          <strong className="text-accent">Job Description Mapping: </strong>
+                          {sec.internships.jdRelevanceExplanation}
+                        </div>
+                      )}
+                      {sec.internships.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Internship Bullet Strategy:</strong>{" "}
+                            {sec.internships.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 5. Verified Certifications */}
+                  {sec?.certifications && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <GraduationCap className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            5. Verified Certifications &amp; Accreditations
+                          </h4>
+                          {sec.certifications.verifiedCount > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] bg-success/10 text-success border-success/30"
+                            >
+                              {sec.certifications.verifiedCount} Verified
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.certifications.score} / {sec.certifications.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.certifications.audit}
+                      </p>
+                      {sec.certifications.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Certification Strategy:</strong>{" "}
+                            {sec.certifications.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 6. Achievements & Verifiable Proof */}
+                  {sec?.achievements && (
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Award className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                            6. Achievements, Hackathons &amp; Verifiable Proof
+                          </h4>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {sec.achievements.score} / {sec.achievements.max} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
+                        {sec.achievements.audit}
+                      </p>
+                      {sec.achievements.fixTip && (
+                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="text-foreground">Achievement Impact:</strong>{" "}
+                            {sec.achievements.fixTip}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              {/* Tab: Actionable Improvement Roadmap */}
+              <TabsContent value="roadmap" className="mt-0 space-y-5">
+                {/* Section-by-Section Step-by-Step Fixes */}
+                {a.sectionImprovements && a.sectionImprovements.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <TrendingUp className="size-4 text-primary" />
+                      Section-by-Section Concrete Improvements
+                    </h4>
+                    <div className="space-y-3">
+                      {a.sectionImprovements.map((imp, i) => (
+                        <div
+                          key={i}
+                          className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-foreground">
+                              {imp.section}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] uppercase font-bold text-warning border-warning/30 bg-warning/10"
+                            >
+                              Identified Gap
+                            </Badge>
+                          </div>
+                          {imp.currentGap && (
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              <strong className="text-foreground/80">Flaw: </strong>
+                              {imp.currentGap}
+                            </p>
+                          )}
+                          {imp.actionableFix && (
+                            <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                              <Check className="size-4 shrink-0 mt-0.5 text-success font-bold" />
+                              <span>
+                                <strong className="text-foreground">Actionable Fix: </strong>
+                                {imp.actionableFix}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Priority Skills to Master */}
+                <RoadmapBlock
+                  title="Priority Technical Tools to Master (Ordered by Hiring Impact)"
+                  icon={<Wrench className="size-4 text-primary" />}
+                  items={
+                    a.skillMatrix.recommended.length > 0
+                      ? a.skillMatrix.recommended
+                      : a.techImprovementIdeas
+                  }
+                />
+
+                {/* Placement & Interview Strategy Tips */}
+                {a.placementTips && a.placementTips.length > 0 && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                      <Target className="size-4" /> Tactical Placement &amp; Interview Tips
+                    </h4>
+                    <ul className="space-y-2">
+                      {a.placementTips.map((tip, i) => (
+                        <li
+                          key={i}
+                          className="flex items-start gap-2 text-xs text-foreground leading-relaxed"
+                        >
+                          <span className="font-bold text-primary select-none mt-0.5">✓</span>
+                          <span>{tip}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Portfolio Project Suggestions */}
+                <RoadmapBlock
+                  title="Recommended Portfolio Projects with System Architecture"
+                  icon={<Lightbulb className="size-4 text-accent" />}
+                  items={a.projectSuggestions}
+                />
+              </TabsContent>
+
+              {/* Tab: Bullet Rewrites */}
+              <TabsContent value="rewrites" className="mt-0 space-y-4">
+                {a.bulletRewrites.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No bullet rewrites suggested.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {a.bulletRewrites.map((r, i) => (
+                      <div
+                        key={i}
+                        className="space-y-3 rounded-xl border border-border bg-secondary/15 p-4"
+                      >
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Original Bullet
+                          </span>
+                          <p className="mt-1 rounded-lg bg-secondary/40 border border-border px-3 py-2 text-xs text-foreground/80">
+                            {r.original}
+                          </p>
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-success">
+                            Optimized Bullet (Action Verb + Tech Stack + Outcome)
+                          </span>
+                          <div className="mt-1 flex items-start gap-2 rounded-lg bg-success/10 border border-success/30 p-3">
+                            <ArrowRight className="mt-0.5 size-4 shrink-0 text-success" />
+                            <p className="text-xs font-semibold text-foreground leading-relaxed">
+                              {r.rewritten}
+                            </p>
+                          </div>
+                        </div>
+
+                        {r.reason && (
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-semibold text-foreground/80">Rationale: </span>
+                            {r.reason}
+                          </p>
+                        )}
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg"
+                          onClick={() => copyText(r.rewritten)}
+                        >
+                          <Copy className="size-3 mr-1.5" /> Copy Rewritten Bullet
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
               {/* Tab: Issues & Red Flags */}
               <TabsContent value="issues" className="mt-0 space-y-4">
                 {a.criticalIssues.length === 0 ? (
@@ -443,73 +814,6 @@ export function RectifyDrawer({
                     empty="No immediate skill additions needed"
                   />
                 </div>
-              </TabsContent>
-
-              {/* Tab: Bullet Rewrites */}
-              <TabsContent value="rewrites" className="mt-0 space-y-4">
-                {a.bulletRewrites.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No bullet rewrites suggested.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {a.bulletRewrites.map((r, i) => (
-                      <div
-                        key={i}
-                        className="space-y-3 rounded-xl border border-border bg-secondary/15 p-4"
-                      >
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            Original Bullet
-                          </span>
-                          <p className="mt-1 rounded-lg bg-secondary/40 border border-border px-3 py-2 text-xs text-foreground/80">
-                            {r.original}
-                          </p>
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-success">
-                            Optimized Bullet (Action Verb + Tech Stack + Outcome)
-                          </span>
-                          <div className="mt-1 flex items-start gap-2 rounded-lg bg-success/10 border border-success/30 p-3">
-                            <ArrowRight className="mt-0.5 size-4 shrink-0 text-success" />
-                            <p className="text-xs font-semibold text-foreground leading-relaxed">
-                              {r.rewritten}
-                            </p>
-                          </div>
-                        </div>
-
-                        {r.reason && (
-                          <p className="text-xs text-muted-foreground">
-                            <span className="font-semibold text-foreground/80">Rationale: </span>
-                            {r.reason}
-                          </p>
-                        )}
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg"
-                          onClick={() => copyText(r.rewritten)}
-                        >
-                          <Copy className="size-3 mr-1.5" /> Copy Rewritten Bullet
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Tab: Growth Roadmap */}
-              <TabsContent value="roadmap" className="mt-0 space-y-5">
-                <RoadmapBlock
-                  title="Priority Technical Tools to Master"
-                  icon={<Wrench className="size-4 text-primary" />}
-                  items={a.techImprovementIdeas}
-                />
-                <RoadmapBlock
-                  title="Recommended Portfolio Projects"
-                  icon={<Lightbulb className="size-4 text-accent" />}
-                  items={a.projectSuggestions}
-                />
               </TabsContent>
 
               {/* Tab: Strengths */}

@@ -102,12 +102,30 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
   return (metaHeader + text).trim();
 }
 
-async function extractDocx(bytes: Uint8Array): Promise<string> {
+async function extractDocx(bytes: Uint8Array, name: string): Promise<string> {
+  if (name.toLowerCase().endsWith(".doc")) {
+    throw new Error(
+      "Legacy Word (.doc) format is not supported in the browser. Please re-save or convert your resume to .docx or .pdf.",
+    );
+  }
   // @ts-expect-error - browser bundle has no bundled types
   const mammoth = await import("mammoth/mammoth.browser.min.js");
   const lib = mammoth.default ?? mammoth;
-  const result = await lib.extractRawText({ arrayBuffer: bytes.slice().buffer });
-  return String(result.value ?? "").trim();
+  try {
+    const result = await lib.extractRawText({ arrayBuffer: bytes.slice().buffer });
+    const text = String(result.value ?? "").trim();
+    if (!text) {
+      throw new Error("Could not extract readable text from this .docx file. Ensure it is not empty or password protected.");
+    }
+    return text;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Legacy Word")) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("end of central directory") || msg.includes("Can't find end of central directory")) {
+      throw new Error("The Word document is corrupted or is a legacy .doc file renamed to .docx. Please convert to standard .docx or .pdf.");
+    }
+    throw err;
+  }
 }
 
 async function extractImage(
@@ -154,7 +172,7 @@ export async function extractText(
       );
     }
     case "docx":
-      return extractDocx(file.bytes);
+      return extractDocx(file.bytes, file.name);
     case "image":
       return extractImage(file.bytes, file.name, onProgress);
     case "text":

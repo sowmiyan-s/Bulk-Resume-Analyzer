@@ -20,6 +20,7 @@ export interface StoredMongoAnalysis {
 }
 
 export interface AdminSystemSettings {
+  qwenApiKey?: string;
   groqApiKey?: string;
   cerebrasApiKey?: string;
   openrouterApiKey?: string;
@@ -40,8 +41,19 @@ function checkAdminPassword(providedPass?: string): boolean {
     (typeof process !== "undefined" &&
       process.env &&
       (process.env["ADMIN_PASSWORD"] || process.env["VITE_ADMIN_PASSWORD"])) ||
-    DEFAULT_ADMIN_PASS;
-  return p === envPass.trim() || p === DEFAULT_ADMIN_PASS;
+    (process.env?.["NODE_ENV"] === "development" ? "123321" : "");
+  return Boolean(envPass && p === envPass.trim());
+}
+
+function maskSecret(key?: string): string {
+  if (!key || typeof key !== "string") return "";
+  const trimmed = key.trim();
+  if (trimmed.length <= 8) return "••••••••";
+  return `${trimmed.slice(0, 4)}••••••••${trimmed.slice(-4)}`;
+}
+
+function isMasked(key?: string): boolean {
+  return typeof key === "string" && key.includes("••••");
 }
 
 /* ------------------------------- Analyses API ------------------------------- */
@@ -139,7 +151,7 @@ export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(asy
 
 /** Delete a single analysis record from MongoDB Atlas */
 export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { id: string }) => data)
+  .validator((data: { id: string; passcode?: string }) => data)
   .handler(async ({ data }) => {
     try {
       const db = await getDb();
@@ -155,7 +167,7 @@ export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
 
 /** Delete multiple analysis records from MongoDB Atlas */
 export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { ids: string[] }) => data)
+  .validator((data: { ids: string[]; passcode?: string }) => data)
   .handler(async ({ data }) => {
     try {
       const db = await getDb();
@@ -171,8 +183,11 @@ export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
 
 /** Clear all analysis records from MongoDB Atlas */
 export const clearAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { adminPass?: string }) => data)
+  .validator((data: { adminPass?: string; passcode?: string }) => data)
   .handler(async ({ data }) => {
+    if (!checkAdminPassword(data.passcode || data.adminPass)) {
+      return { success: false, error: "Unauthorized: Invalid admin passcode." };
+    }
     try {
       const db = await getDb();
       const col = db.collection("analyses");
@@ -211,19 +226,23 @@ export const saveAdminSettingsFn = createServerFn({ method: "POST" })
         updatedAt: new Date().toISOString(),
       };
 
-      if (data.settings.groqApiKey !== undefined) {
+      // Only update API keys if a new unmasked string was provided
+      if (data.settings.qwenApiKey !== undefined && !isMasked(data.settings.qwenApiKey)) {
+        updateData["qwenApiKey"] = data.settings.qwenApiKey.trim();
+      }
+      if (data.settings.groqApiKey !== undefined && !isMasked(data.settings.groqApiKey)) {
         updateData["groqApiKey"] = data.settings.groqApiKey.trim();
       }
-      if (data.settings.cerebrasApiKey !== undefined) {
+      if (data.settings.cerebrasApiKey !== undefined && !isMasked(data.settings.cerebrasApiKey)) {
         updateData["cerebrasApiKey"] = data.settings.cerebrasApiKey.trim();
       }
-      if (data.settings.openrouterApiKey !== undefined) {
+      if (data.settings.openrouterApiKey !== undefined && !isMasked(data.settings.openrouterApiKey)) {
         updateData["openrouterApiKey"] = data.settings.openrouterApiKey.trim();
       }
-      if (data.settings.nvidiaApiKey !== undefined) {
+      if (data.settings.nvidiaApiKey !== undefined && !isMasked(data.settings.nvidiaApiKey)) {
         updateData["nvidiaApiKey"] = data.settings.nvidiaApiKey.trim();
       }
-      if (data.settings.geminiApiKey !== undefined) {
+      if (data.settings.geminiApiKey !== undefined && !isMasked(data.settings.geminiApiKey)) {
         updateData["geminiApiKey"] = data.settings.geminiApiKey.trim();
       }
       if (data.settings.defaultRole !== undefined) {
@@ -261,6 +280,13 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
 
       const count = await db.collection("analyses").countDocuments().catch(() => 0);
       const ping = await pingMongo();
+
+      const qwenKey =
+        (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+        (typeof process !== "undefined" &&
+          process.env &&
+          (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
+        "";
 
       const groqKey =
         (config?.["groqApiKey"] as string | undefined)?.trim() ||
@@ -300,11 +326,12 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       return {
         success: true,
         settings: {
-          groqApiKey: groqKey,
-          cerebrasApiKey: cerebrasKey,
-          openrouterApiKey: openrouterKey,
-          nvidiaApiKey: nvidiaKey,
-          geminiApiKey: geminiKey,
+          qwenApiKey: maskSecret(qwenKey),
+          groqApiKey: maskSecret(groqKey),
+          cerebrasApiKey: maskSecret(cerebrasKey),
+          openrouterApiKey: maskSecret(openrouterKey),
+          nvidiaApiKey: maskSecret(nvidiaKey),
+          geminiApiKey: maskSecret(geminiKey),
           defaultRole:
             (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
           companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
@@ -322,6 +349,7 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
       return {
         success: true,
         settings: {
+          qwenApiKey: "",
           groqApiKey: "",
           cerebrasApiKey: "",
           openrouterApiKey: "",
@@ -343,18 +371,29 @@ export const getAdminSettingsFn = createServerFn({ method: "POST" })
 export const testApiKeyFn = createServerFn({ method: "POST" })
   .validator(
     (data: {
-      provider: "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
+      provider: "qwen" | "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
       apiKey?: string;
+      passcode?: string;
     }) => data,
   )
   .handler(async ({ data }) => {
     let key = data.apiKey?.trim();
-    if (!key || key === "trigger-database-vault-test") {
+    if (!key || key === "trigger-database-vault-test" || isMasked(key)) {
+      if (data.passcode && !checkAdminPassword(data.passcode)) {
+        return { success: false, message: "Unauthorized: Invalid admin passcode." };
+      }
       try {
         const db = await getDb();
         const col = db.collection("system_settings");
         const config = await col.findOne({ key: "global_config" });
-        if (data.provider === "groq") {
+        if (data.provider === "qwen") {
+          key =
+            (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+            (typeof process !== "undefined" &&
+              process.env &&
+              (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
+            "";
+        } else if (data.provider === "groq") {
           key =
             (config?.["groqApiKey"] as string | undefined)?.trim() ||
             (typeof process !== "undefined" &&
@@ -400,6 +439,29 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
         success: false,
         message: `No API key configured in MongoDB Vault for ${data.provider.toUpperCase()}. Please add it in Admin Panel (/admin).`,
       };
+    }
+
+    if (data.provider === "qwen") {
+      try {
+        const res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: "qwen-turbo",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) return { success: true, message: "Qwen / Alibaba DashScope API key is valid and working!" };
+        const err = await res.text().catch(() => "");
+        return { success: false, message: `Qwen DashScope check failed (${res.status}): ${err}` };
+      } catch (e) {
+        return { success: false, message: `Qwen connection failed: ${String(e)}` };
+      }
     }
 
     if (data.provider === "groq") {
@@ -520,6 +582,13 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
     const col = db.collection("system_settings");
     const config = await col.findOne({ key: "global_config" });
 
+    const hasServerQwenKey = Boolean(
+      (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])?.trim())),
+    );
+
     const hasServerGroqKey = Boolean(
       (config?.["groqApiKey"] as string | undefined)?.trim() ||
       (typeof process !== "undefined" &&
@@ -557,6 +626,7 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
 
     return {
       success: true,
+      hasServerQwenKey,
       hasServerGroqKey,
       hasServerCerebrasKey,
       hasServerOpenRouterKey,
@@ -569,6 +639,11 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       databaseConnected: true,
     };
   } catch {
+    const hasEnvQwen = Boolean(
+      typeof process !== "undefined" &&
+        process.env &&
+        ((process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])?.trim()),
+    );
     const hasEnvGroq = Boolean(
       typeof process !== "undefined" &&
         process.env &&
@@ -587,6 +662,7 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
 
     return {
       success: false,
+      hasServerQwenKey: hasEnvQwen,
       hasServerGroqKey: hasEnvGroq,
       hasServerCerebrasKey: false,
       hasServerOpenRouterKey: false,

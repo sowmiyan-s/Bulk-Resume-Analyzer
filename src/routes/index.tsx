@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   LayoutGrid,
   Loader2,
+  Lock,
   Play,
   RefreshCw,
   RotateCcw,
@@ -14,6 +15,7 @@ import {
   Trash2,
   Trophy,
   Upload,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,7 +26,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Leaderboard } from "@/components/Leaderboard";
-import { MasterTable } from "@/components/MasterTable";
+import { MasterTable, type MasterRow } from "@/components/MasterTable";
 import { RectifyDrawer, type RectifyTarget } from "@/components/RectifyDrawer";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { effectiveScore, normalizeAnalysis, type Analysis } from "@/lib/analysis-types";
@@ -80,6 +82,7 @@ type QueueItem = {
 };
 
 export type SystemInfo = {
+  hasServerQwenKey?: boolean;
   hasServerGroqKey?: boolean;
   hasServerCerebrasKey?: boolean;
   hasServerOpenRouterKey?: boolean;
@@ -108,35 +111,71 @@ function Index() {
   const [tab, setTab] = useState<"analyze" | "leaderboard">("analyze");
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
-  const [cooldownSec, setCooldownSec] = useState(70);
-  const [concurrency, setConcurrency] = useState(1);
+  const [cooldownSec, setCooldownSec] = useState(0);
+  const [concurrency, setConcurrency] = useState(10);
   const [maxRetries, setMaxRetries] = useState(3);
   const [running, setRunning] = useState(false);
+  const [shortlistCutoff, setShortlistCutoff] = useState<number>(75);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const queueRef = useRef<RateLimitedQueue<Analysis> | null>(null);
+
 
   const refreshSystemInfo = useCallback(async () => {
     try {
       const info = await getPublicSystemInfoFn();
       if (info) {
         setSystemInfo(info);
-        if (
-          info.defaultModelId &&
-          typeof window !== "undefined" &&
-          !window.localStorage.getItem("resume-radiance.settings.v1")
-        ) {
-          setSettings((prev) => ({ ...prev, modelId: info.defaultModelId! }));
+        if (info.defaultModelId) {
+          setSettings((prev) => {
+            if (prev.modelId === info.defaultModelId) return prev;
+            return {
+              ...prev,
+              modelId: info.defaultModelId!,
+              defaultRole: info.defaultRole || prev.defaultRole,
+              companyName: info.companyName || prev.companyName,
+            };
+          });
           const m = findModel(info.defaultModelId);
           if (m?.recommendedConcurrency) {
             setConcurrency(m.recommendedConcurrency);
+          }
+          if (m?.recommendedCooldownSec !== undefined) {
+            setCooldownSec(m.recommendedCooldownSec);
           }
         }
       }
     } catch {
       /* ignore */
     }
+  }, []);
+
+  // Listen for real-time model changes from Admin Panel or Settings
+  useEffect(() => {
+    const handleModelChange = (e: Event) => {
+      const customEv = e as CustomEvent<string>;
+      const newModelId = customEv.detail || loadSettings().modelId;
+      if (newModelId) {
+        setSettings((prev) => {
+          if (prev.modelId === newModelId) return prev;
+          return { ...prev, modelId: newModelId };
+        });
+        const m = findModel(newModelId);
+        if (m?.recommendedConcurrency) {
+          setConcurrency(m.recommendedConcurrency);
+        }
+        if (m?.recommendedCooldownSec !== undefined) {
+          setCooldownSec(m.recommendedCooldownSec);
+        }
+      }
+    };
+    window.addEventListener("rr:model-changed", handleModelChange);
+    window.addEventListener("storage", handleModelChange);
+    return () => {
+      window.removeEventListener("rr:model-changed", handleModelChange);
+      window.removeEventListener("storage", handleModelChange);
+    };
   }, []);
 
   // Hydrate settings, cloud database analyses, and MongoDB public system info on mount
@@ -203,7 +242,11 @@ function Index() {
     if (m?.recommendedCooldownSec !== undefined) {
       setCooldownSec(m.recommendedCooldownSec);
     }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("rr:model-changed", { detail: next.modelId }));
+    }
   }, []);
+
 
   /* ------------------------------ file intake ----------------------------- */
 
@@ -252,23 +295,33 @@ function Index() {
           id: toastId,
         });
 
-        // Optimistic background pre-extraction: extract and clean text immediately!
-        freshItems.forEach(async (item) => {
-          try {
-            const raw = await extractText(item.file);
-            const { clean, fixes, warnings } = sanitizeResumeText(raw);
-            patch(item.id, {
-              rawText: raw,
-              cleanText: clean,
-              fixes,
-              warnings,
-              progress: 10,
-              message: "Ready",
-            });
-          } catch {
-            // If background extraction errors, standard analyzeOne will handle/report it.
+        // High-concurrency pooled pre-extraction: extract up to 10 files in parallel for 50 resumes
+        let queueIndex = 0;
+        const poolWorker = async () => {
+          while (queueIndex < freshItems.length) {
+            const item = freshItems[queueIndex++];
+            if (!item) break;
+            try {
+              const raw = await extractText(item.file);
+              const { clean, fixes, warnings } = sanitizeResumeText(raw);
+              patch(item.id, {
+                rawText: raw,
+                cleanText: clean,
+                fixes,
+                warnings,
+                progress: 10,
+                message: "Ready",
+              });
+            } catch {
+              // If background extraction errors, standard analyzeOne will handle/report it.
+            }
           }
-        });
+        };
+
+        const workersCount = Math.min(10, freshItems.length);
+        for (let w = 0; w < workersCount; w++) {
+          void poolWorker();
+        }
       } catch {
         toast.error("Could not read that archive. Make sure the ZIP isn't password protected.", {
           id: toastId,
@@ -277,6 +330,7 @@ function Index() {
     },
     [patch],
   );
+
 
   /* ------------------------------- analysis ------------------------------- */
 
@@ -523,6 +577,7 @@ function Index() {
       ? Math.round(done.reduce((s, i) => s + effectiveScore(i.analysis!), 0) / done.length)
       : 0;
     const tier1 = done.filter((i) => i.analysis!.readinessTier.startsWith("Tier 1")).length;
+    const shortlisted = done.filter((i) => effectiveScore(i.analysis!) >= shortlistCutoff).length;
     return {
       total: items.length,
       done: done.length,
@@ -531,9 +586,11 @@ function Index() {
       retrying: retrying.length,
       avg,
       tier1,
+      shortlisted,
       doneRows: done.map((i) => ({ id: i.id, fileName: i.file.name, analysis: i.analysis! })),
     };
-  }, [items]);
+  }, [items, shortlistCutoff]);
+
 
   const overallProgress = stats.total ? (stats.done / stats.total) * 100 : 0;
 
@@ -866,10 +923,14 @@ function Index() {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-xl border border-border/80 bg-secondary/40 px-3 py-1.5 text-xs text-muted-foreground sm:flex">
-              <span className="size-2 rounded-full bg-success" />
+            <Link
+              to="/admin"
+              className="hidden items-center gap-1.5 rounded-xl border border-border/80 bg-secondary/40 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground sm:flex transition-colors group"
+              title="Active AI model is configured in Admin Portal (Admin Only)"
+            >
+              <Lock className="size-3 text-primary group-hover:text-primary transition-colors" />
               <span className="font-medium text-foreground">{activeModel.label}</span>
-            </div>
+            </Link>
             <Link
               to="/admin"
               className="inline-flex items-center gap-1.5 rounded-xl border border-border/80 bg-secondary/30 px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
@@ -883,6 +944,7 @@ function Index() {
               onSave={persist}
             />
           </div>
+
         </div>
       </header>
 
@@ -899,7 +961,7 @@ function Index() {
               onFiles: handleFiles,
               onRun: runBatch,
               onStop: stop,
-              onRetry: retryFailed,
+              onRetry: runBatch,
               onClear: async () => {
                 if (confirm("Clear all loaded and analyzed candidates?")) {
                   setItems([]);
@@ -932,6 +994,8 @@ function Index() {
               setConcurrency,
               maxRetries,
               setMaxRetries,
+              shortlistCutoff,
+              setShortlistCutoff,
             }}
           />
         ) : (
@@ -951,6 +1015,8 @@ function Index() {
               onDelete={deleteItem}
               onReevaluate={(id) => reanalyzeWithCurrentJd([id])}
               hasActiveJd={hasActiveJd}
+              shortlistCutoff={shortlistCutoff}
+              onShortlistCutoffChange={setShortlistCutoff}
             />
           </section>
         )}
@@ -998,6 +1064,8 @@ function TabButton({
   );
 }
 
+/* ----------------------------- Sub-Views & Tabs ---------------------------- */
+
 type Stats = {
   total: number;
   done: number;
@@ -1006,7 +1074,8 @@ type Stats = {
   retrying: number;
   avg: number;
   tier1: number;
-  doneRows: { id: string; fileName: string; analysis: Analysis }[];
+  shortlisted: number;
+  doneRows: MasterRow[];
 };
 
 function AnalyzeView({
@@ -1029,7 +1098,7 @@ function AnalyzeView({
     onFiles: (files: FileList | null) => void;
     onRun: () => void;
     onStop: () => void;
-    onRetry: () => void;
+    onRetry?: () => void;
     onClear: () => void;
     onDelete?: (id: string) => void;
     onDeleteMany?: (ids: string[]) => void;
@@ -1053,12 +1122,13 @@ function AnalyzeView({
     setConcurrency: (v: number) => void;
     maxRetries: number;
     setMaxRetries: (v: number) => void;
+    shortlistCutoff: number;
+    setShortlistCutoff: (v: number) => void;
   };
 }) {
   const dragging = useRef(false);
   return (
     <div className="space-y-8">
-      {/* Intro */}
       <div className="space-y-1.5">
         <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
           Evaluate Resumes in Bulk
@@ -1069,116 +1139,107 @@ function AnalyzeView({
         </p>
       </div>
 
-      {/* Input & Settings Grid */}
       <div className="grid gap-6 lg:grid-cols-12">
-        {/* Column 1: Upload & Job Description (7 cols) */}
-        <section className="panel flex flex-col justify-between overflow-hidden lg:col-span-7">
-          <div className="panel-header flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Upload className="size-4 text-primary" />
-              <span>1. Upload Resumes</span>
+        <section className="space-y-4 lg:col-span-7">
+          <label
+            aria-label="Upload resume files"
+            onDragOver={(e) => {
+              e.preventDefault();
+              handlers.setDragging(true);
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              handlers.setDragging(true);
+            }}
+            onDragLeave={() => handlers.setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              handlers.setDragging(false);
+              void handlers.onFiles(e.dataTransfer.files);
+            }}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all ${
+              dragging.current
+                ? "border-primary bg-primary/5"
+                : "border-border bg-secondary/30 hover:border-primary/60 hover:bg-secondary/50"
+            }`}
+          >
+            <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-secondary text-foreground">
+              <Upload className="size-6 text-muted-foreground" />
             </div>
-            {items.length > 0 && (
-              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                {items.length} file{items.length > 1 ? "s" : ""} selected
-              </span>
-            )}
-          </div>
+            <p className="text-sm font-semibold text-foreground">
+              Drag and drop resumes here, or click to browse
+            </p>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Supports .zip folder, PDF, Word (.docx, .doc), text, and image scans
+            </p>
+            <input
+              type="file"
+              multiple
+              accept=".zip,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,image/*"
+              className="hidden"
+              onChange={(e) => void handlers.onFiles(e.target.files)}
+            />
+          </label>
 
-          <div className="panel-body flex-1 space-y-5">
-            <label
-              onDragOver={(e) => {
-                e.preventDefault();
-                handlers.setDragging(true);
-              }}
-              onDragLeave={() => handlers.setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                handlers.setDragging(false);
-                void handlers.onFiles(e.dataTransfer.files);
-              }}
-              className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all ${
-                dragging.current
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-secondary/30 hover:border-primary/60 hover:bg-secondary/50"
-              }`}
-            >
-              <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-secondary text-foreground">
-                <Upload className="size-6 text-muted-foreground" />
+          <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label
+                  htmlFor="jd-toggle"
+                  className="text-xs font-semibold text-foreground cursor-pointer"
+                >
+                  Match against a specific Job Description
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {control.useJd
+                    ? "Acting as that company's hiring manager — blunt about fit."
+                    : "Off: assesses against the default role set in AI Engine."}
+                </p>
               </div>
-              <p className="text-sm font-semibold text-foreground">
-                Drag and drop resumes here, or click to browse
-              </p>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Supports .zip folder, PDF, Word (.docx, .doc), text, and image scans
-              </p>
-              <input
-                type="file"
-                multiple
-                accept=".zip,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,image/*"
-                className="hidden"
-                onChange={(e) => void handlers.onFiles(e.target.files)}
-              />
-            </label>
+              <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
+            </div>
 
-            {/* Job Description Card */}
-            <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label
-                    htmlFor="jd-toggle"
-                    className="text-xs font-semibold text-foreground cursor-pointer"
-                  >
-                    Match against a specific Job Description
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    {control.useJd
-                      ? "Acting as that company's hiring manager — blunt about fit."
-                      : "Off: assesses against the default role set in AI Engine."}
-                  </p>
-                </div>
-                <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
-              </div>
-
-              {control.useJd && (
-                <div className="space-y-2.5">
-                  <Textarea
-                    value={control.jd}
-                    onChange={(e) => control.setJd(e.target.value)}
-                    placeholder="Paste the full job description or key requirements here…"
-                    className="min-h-28 text-xs leading-relaxed rounded-lg"
-                  />
-                  {control.jd.trim() && items.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                      <span className="text-[11px] text-muted-foreground">
-                        Ready to re-evaluate {items.length} candidate{items.length > 1 ? "s" : ""} against this JD
+            {control.useJd && (
+              <div className="space-y-2.5">
+                <Textarea
+                  value={control.jd}
+                  onChange={(e) => control.setJd(e.target.value)}
+                  placeholder="Paste the full job description or key requirements here…"
+                  className="min-h-28 text-xs leading-relaxed rounded-lg"
+                />
+                {control.jd.trim() && items.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      Target JD ready:{" "}
+                      <span className="font-semibold text-foreground">
+                        {control.jd.trim().slice(0, 45)}...
                       </span>
-                      {handlers.onReevaluateAllJd && (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          onClick={handlers.onReevaluateAllJd}
-                          disabled={running}
-                          className="h-7 text-xs font-semibold rounded-lg shadow-sm"
-                        >
-                          <Sparkles className="size-3.5 mr-1.5" />
-                          Re-evaluate All with Current JD
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                    </span>
+                    {handlers.onReevaluateAllJd && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="h-7 text-xs font-semibold"
+                        onClick={handlers.onReevaluateAllJd}
+                        disabled={running}
+                      >
+                        <RefreshCw className="size-3 mr-1 text-primary" />
+                        Re-evaluate All ({items.length}) with this JD
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
-        {/* Column 2: Controls & Actions (5 cols) */}
         <section className="panel flex flex-col justify-between overflow-hidden lg:col-span-5">
-          <div className="panel-header flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <RotateCcw className="size-4 text-primary" />
-              <span>2. Screening Settings</span>
+          <div className="panel-header flex items-center justify-between border-b border-border">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">Screening Engine</h2>
             </div>
             {running && (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-warning">
@@ -1188,8 +1249,112 @@ function AnalyzeView({
           </div>
 
           <div className="panel-body flex-1 space-y-5">
-            {/* Sliders */}
             <div className="space-y-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-semibold">Parallel Concurrency</span>
+                  <span className="font-bold font-mono text-primary text-xs">
+                    {control.concurrency} concurrent worker{control.concurrency > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  <Button
+                    type="button"
+                    variant={control.concurrency === 50 ? "default" : "outline"}
+                    size="sm"
+                    disabled={running}
+                    onClick={() => {
+                      control.setConcurrency(50);
+                      control.setCooldownSec(0);
+                    }}
+                    className="h-7 px-2 text-[11px] font-semibold"
+                  >
+                    ⚡ 50 Turbo (Max)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={control.concurrency === 25 ? "default" : "outline"}
+                    size="sm"
+                    disabled={running}
+                    onClick={() => {
+                      control.setConcurrency(25);
+                      control.setCooldownSec(0);
+                    }}
+                    className="h-7 px-2 text-[11px] font-semibold"
+                  >
+                    🚀 25 Fast
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={control.concurrency === 10 ? "default" : "outline"}
+                    size="sm"
+                    disabled={running}
+                    onClick={() => {
+                      control.setConcurrency(10);
+                      control.setCooldownSec(1);
+                    }}
+                    className="h-7 px-2 text-[11px] font-semibold"
+                  >
+                    ⚡ 10 High
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={control.concurrency === 5 ? "default" : "outline"}
+                    size="sm"
+                    disabled={running}
+                    onClick={() => {
+                      control.setConcurrency(5);
+                      control.setCooldownSec(1);
+                    }}
+                    className="h-7 px-2 text-[11px] font-semibold"
+                  >
+                    5 Standard
+                  </Button>
+                  {![1, 5, 10, 25, 50].includes(activeModel.recommendedConcurrency) && (
+                    <Button
+                      type="button"
+                      variant={
+                        control.concurrency === activeModel.recommendedConcurrency
+                          ? "default"
+                          : "outline"
+                      }
+                      size="sm"
+                      disabled={running}
+                      onClick={() => {
+                        control.setConcurrency(activeModel.recommendedConcurrency);
+                        control.setCooldownSec(activeModel.recommendedCooldownSec);
+                      }}
+                      className="h-7 px-2 text-[11px] font-semibold border-primary/40 text-primary hover:bg-primary/10"
+                    >
+                      🎯 {activeModel.recommendedConcurrency} Recommended ({activeModel.provider.toUpperCase()})
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant={control.concurrency === 1 ? "default" : "outline"}
+                    size="sm"
+                    disabled={running}
+                    onClick={() => {
+                      control.setConcurrency(1);
+                      control.setCooldownSec(4);
+                    }}
+                    className="h-7 px-2 text-[11px] font-semibold"
+                  >
+                    1 Safe
+                  </Button>
+                </div>
+
+                <Slider
+                  value={[control.concurrency]}
+                  min={1}
+                  max={50}
+                  step={1}
+                  disabled={running}
+                  onValueChange={([v]) => control.setConcurrency(v ?? 1)}
+                  className="pt-1.5"
+                />
+              </div>
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Request Cooldown</span>
@@ -1204,23 +1369,6 @@ function AnalyzeView({
                   step={1}
                   disabled={running}
                   onValueChange={([v]) => control.setCooldownSec(v ?? 0)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Concurrency</span>
-                  <span className="font-medium font-mono text-foreground">
-                    {control.concurrency} worker{control.concurrency > 1 ? "s" : ""}
-                  </span>
-                </div>
-                <Slider
-                  value={[control.concurrency]}
-                  min={1}
-                  max={3}
-                  step={1}
-                  disabled={running}
-                  onValueChange={([v]) => control.setConcurrency(v ?? 1)}
                 />
               </div>
 
@@ -1242,11 +1390,14 @@ function AnalyzeView({
               </div>
             </div>
 
-            {/* Live Metric Cards */}
             <div className="grid grid-cols-4 gap-2 rounded-xl border border-border bg-secondary/30 p-2.5 text-center">
               <StatPill label="Total" value={stats.total} />
               <StatPill label="Done" value={stats.done} tone="text-foreground font-bold" />
-              <StatPill label="Shortlist" value={stats.tier1} tone="text-success font-bold" />
+              <StatPill
+                label={`Shortlist (≥${control.shortlistCutoff}%)`}
+                value={stats.shortlisted}
+                tone="text-emerald-600 dark:text-emerald-400 font-bold"
+              />
               <StatPill
                 label="Avg Score"
                 value={stats.avg > 0 ? stats.avg : "—"}
@@ -1254,7 +1405,6 @@ function AnalyzeView({
               />
             </div>
 
-            {/* Action Buttons */}
             <div className="space-y-2 pt-1">
               <Button
                 onClick={handlers.onRun}
@@ -1321,7 +1471,6 @@ function AnalyzeView({
         </section>
       </div>
 
-      {/* Live Queue */}
       {items.some((i) => i.status !== "done") && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
@@ -1349,36 +1498,31 @@ function AnalyzeView({
                           Attempt {item.attempt}
                         </span>
                       )}
-                    </div>
-                    <p className="truncate text-xs mt-0.5">
-                      {item.status === "error" || item.status === "cancelled" ? (
-                        <span className="text-destructive font-medium">{item.message}</span>
-                      ) : item.status === "retrying" ? (
-                        <span className="text-warning font-medium">{item.message}</span>
-                      ) : item.status === "analyzing" ? (
-                        <span className="text-primary font-medium">{item.message}</span>
-                      ) : (
-                        <span className="text-muted-foreground">{item.message || item.status}</span>
+                      {item.durationMs !== null && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {Math.round(item.durationMs / 1000)}s
+                        </span>
                       )}
-                    </p>
-                    {(item.status === "extracting" ||
-                      item.status === "analyzing" ||
-                      item.status === "retrying") && (
-                      <div className="mt-2 h-1.5 w-full bg-secondary/80 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-primary via-accent to-primary animate-pulse transition-all duration-500"
-                          style={{ width: `${Math.max(12, item.progress)}%` }}
-                        />
-                      </div>
+                    </div>
+                    {item.message && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">{item.message}</p>
                     )}
                   </div>
+                  {item.status === "analyzing" && (
+                    <Loader2 className="size-4 animate-spin text-primary" />
+                  )}
+                  {item.status === "extracting" && (
+                    <Loader2 className="size-4 animate-spin text-primary" />
+                  )}
+                  {item.status === "retrying" && (
+                    <RotateCcw className="size-4 animate-spin text-warning" />
+                  )}
                 </div>
               ))}
           </div>
         </section>
       )}
 
-      {/* Results Register */}
       {stats.doneRows.length > 0 && (
         <section className="space-y-4 pt-2">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
@@ -1387,7 +1531,7 @@ function AnalyzeView({
                 Candidate Rankings &amp; Audit
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {stats.doneRows.length} candidates assessed · {stats.tier1} ready for shortlist
+                {stats.doneRows.length} candidates assessed · {stats.shortlisted} meet shortlist threshold (≥{control.shortlistCutoff}%)
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1409,6 +1553,8 @@ function AnalyzeView({
             onReevaluate={handlers.onReevaluate}
             onReevaluateMany={handlers.onReevaluateMany}
             hasActiveJd={Boolean(control.useJd && control.jd.trim())}
+            shortlistCutoff={control.shortlistCutoff}
+            onShortlistCutoffChange={control.setShortlistCutoff}
           />
         </section>
       )}
