@@ -18,6 +18,7 @@ export interface ProxyLlmPayload {
 }
 
 interface ProviderVaultKeys {
+  lovable?: string | undefined;
   qwen?: string | undefined;
   groq?: string | undefined;
   cerebras?: string | undefined;
@@ -62,6 +63,9 @@ async function loadVaultKeys(): Promise<ProviderVaultKeys> {
 
   // 2. Fallback to process.env if available
   if (typeof process !== "undefined" && process.env) {
+    const lovable = process.env["LOVABLE_API_KEY"]?.trim();
+    if (!keys.lovable && lovable) keys.lovable = lovable;
+
     const qwen = (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])?.trim();
     if (!keys.qwen && qwen) keys.qwen = qwen;
 
@@ -185,7 +189,9 @@ async function invokeChatCompletions(
   let fallbackEndpoint: string | undefined;
 
   if (!endpoint) {
-    if (provider === "qwen") {
+    if (provider === "lovable") {
+      endpoint = "https://ai.gateway.lovable.dev/v1/chat/completions";
+    } else if (provider === "qwen") {
       const envBase =
         typeof process !== "undefined" && process.env
           ? process.env["QWEN_BASE_URL"] || process.env["DASHSCOPE_BASE_URL"]
@@ -258,6 +264,21 @@ async function invokeChatCompletions(
     signal: AbortSignal.timeout(45000),
   });
 
+  // Bounded retry with backoff on transient rate limits / overloads before giving up
+  for (let attempt = 1; attempt <= 3 && (res.status === 429 || res.status >= 500); attempt++) {
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 20000)
+      : Math.min(1000 * 2 ** attempt, 8000) + Math.floor(Math.random() * 400);
+    await sleep(waitMs);
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
   // If primary DashScope endpoint returned 403 (Access denied / region mismatch), try secondary endpoint
   if (!res.ok && (res.status === 403 || res.status === 404) && fallbackEndpoint) {
     try {
@@ -329,6 +350,7 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
 
     // 1. Determine effective key for primary provider
     let primaryKey = apiKey?.trim() || vaultKeys[provider as keyof ProviderVaultKeys]?.trim();
+    if (provider === "lovable") primaryKey = vaultKeys.lovable ?? primaryKey;
     if (provider === "ollama") primaryKey = "ollama-local";
     if (provider === "litellm" && !primaryKey) primaryKey = "sk-litellm";
 
