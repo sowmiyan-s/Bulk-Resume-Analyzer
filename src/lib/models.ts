@@ -5,6 +5,7 @@
  */
 
 export type ProviderId =
+  | "lovable"
   | "qwen"
   | "groq"
   | "cerebras"
@@ -48,7 +49,45 @@ export const NVIDIA_BASE = "https://integrate.api.nvidia.com/v1/chat/completions
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 export const LITELLM_DEFAULT_BASE = "http://localhost:4000/v1";
 
+export const LOVABLE_GATEWAY_BASE = "https://ai.gateway.lovable.dev/v1/chat/completions";
+
 export const MODELS: ModelOption[] = [
+  // =========================================================================
+  // 🏆 0. LOVABLE AI GATEWAY (hosted key, no free-tier RPM wall)
+  // =========================================================================
+  {
+    id: "google/gemini-3.7-flash",
+    label: "Gemini 3.7 Flash (Lovable AI Gateway)",
+    provider: "lovable",
+    tag: "Recommended",
+    note: "Hosted gateway key · no per-minute free-tier wall · best default for 50+ resumes/day batches.",
+    browserDirect: false,
+    supportsJsonMode: true,
+    recommendedConcurrency: 3,
+    recommendedCooldownSec: 0,
+  },
+  {
+    id: "google/gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash Lite (Lovable AI Gateway)",
+    provider: "lovable",
+    tag: "High Rate Limit",
+    note: "Cheapest high-volume option on the hosted gateway for very large resume batches.",
+    browserDirect: false,
+    supportsJsonMode: true,
+    recommendedConcurrency: 4,
+    recommendedCooldownSec: 0,
+  },
+  {
+    id: "openai/gpt-5.4-mini",
+    label: "GPT-5.4 Mini (Lovable AI Gateway)",
+    provider: "lovable",
+    tag: "Deep Reasoning",
+    note: "Stronger critique quality on the hosted gateway when accuracy matters more than speed.",
+    browserDirect: false,
+    supportsJsonMode: true,
+    recommendedConcurrency: 2,
+    recommendedCooldownSec: 1,
+  },
   // =========================================================================
   // 🌟 1. QWEN CLOUD (home.qwencloud.com/benefits · 1M-2M Free Trial Tokens)
   // =========================================================================
@@ -433,9 +472,10 @@ export const MODELS: ModelOption[] = [
   },
 ];
 
-export const DEFAULT_MODEL_ID = "google/diffusiongemma-26b-a4b-it";
+export const DEFAULT_MODEL_ID = "google/gemini-3.7-flash";
 
 export const FALLBACK_PROVIDER_ORDER: ProviderId[] = [
+  "lovable",
   "nvidia",
   "groq",
   "openrouter",
@@ -468,6 +508,7 @@ export function modelsByProvider(): Record<ProviderId, ModelOption[]> {
 }
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
+  lovable: "🏆 Lovable AI Gateway (hosted key · no free-tier rate wall)",
   qwen: "🌟 Qwen Cloud Benefits (home.qwencloud.com/benefits · 1M-2M Free Tokens)",
   groq: "⚡ Groq Cloud (100% Free · 14,400/Day · 500+ tok/s)",
   cerebras: "🚀 Cerebras Wafer-Scale (100% Free · 1,800 tok/s)",
