@@ -44,7 +44,7 @@ export type LlmSettings = {
 };
 
 export const DEFAULT_SETTINGS: LlmSettings = {
-  modelId: "qwen-plus",
+  modelId: "google/diffusiongemma-26b-a4b-it",
   apiKey: "",
   proxyUrl: "",
   customBaseUrl: "",

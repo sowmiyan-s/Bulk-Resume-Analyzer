@@ -584,12 +584,39 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     "—",
   );
 
+  const sectionAudits = toSectionAudits(
+    pick(o, "section_audits", "sectionAudits", "sections"),
+    breakdown,
+  );
+
+  // If score breakdown was provided, keep it; otherwise synthesize from section audits
+  const finalBreakdown: ScoreRow[] =
+    breakdown.length > 0
+      ? breakdown
+      : [
+          { category: "Technical Skills Depth & Stack", score: sectionAudits.skills.score, max: 25, note: sectionAudits.skills.audit },
+          { category: "Project Complexity & Architecture", score: sectionAudits.projects.score, max: 25, note: sectionAudits.projects.audit },
+          { category: "Internships & Practical Track Record (JD-Aligned)", score: sectionAudits.internships.score, max: 20, note: sectionAudits.internships.audit },
+          { category: "Professional Summary & Career Positioning", score: sectionAudits.summary.score, max: 10, note: sectionAudits.summary.audit },
+          { category: "Verified Certifications & Accreditations", score: sectionAudits.certifications.score, max: 10, note: sectionAudits.certifications.audit },
+          { category: "Achievements, Hackathons & Verifiable Proof", score: sectionAudits.achievements.score, max: 10, note: sectionAudits.achievements.audit },
+        ];
+
+  const matchedSkills = strArr(
+    pick(matrixRaw, "matched_skills", "matched_keywords", "matched", "present") ??
+      pick(o, "matched_skills", "matched_keywords"),
+  );
+  const missingSkills = strArr(
+    pick(matrixRaw, "missing_skills", "missing_critical_skills", "missing", "gaps") ??
+      pick(o, "missing_skills", "missingKeywords", "missing_critical_skills"),
+  );
+
   return {
     candidateName: str(pick(o, "candidate_name", "candidateName", "name"), "Unnamed candidate"),
     role: str(pick(o, "role", "target_role", "targetRole", "title"), "—"),
     overallScore,
     readinessTier: toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore),
-    scoreBreakdown: breakdown,
+    scoreBreakdown: finalBreakdown,
     hrVerdict: str(pick(o, "hr_verdict", "hrVerdict", "verdict", "summary")),
     recruiterFirstImpression: str(
       pick(o, "recruiter_first_impression", "recruiterFirstImpression", "first_impression"),
@@ -603,13 +630,8 @@ export function normalizeAnalysis(raw: unknown): Analysis {
       pick(o, "formatting_problems", "formattingProblems", "formatting_issues"),
     ),
     skillMatrix: {
-      matched: strArr(
-        pick(matrixRaw, "matched_skills", "matched", "present") ?? pick(o, "matched_skills"),
-      ),
-      missing: strArr(
-        pick(matrixRaw, "missing_skills", "missing", "gaps") ??
-          pick(o, "missing_skills", "missingKeywords"),
-      ),
+      matched: matchedSkills.length ? matchedSkills : sectionAudits.skills.matchedKeywords,
+      missing: missingSkills.length ? missingSkills : sectionAudits.skills.missingCriticalSkills,
       recommended: strArr(
         pick(matrixRaw, "recommended_skills", "recommended", "learn_next") ??
           pick(o, "recommended_skills"),
@@ -624,7 +646,7 @@ export function normalizeAnalysis(raw: unknown): Analysis {
     jdVerdict: str(pick(jdRaw, "verdict", "recommendation") ?? pick(o, "jd_verdict")),
     manualScore: null,
     officerNotes: "",
-    sectionAudits: toSectionAudits(pick(o, "section_audits", "sectionAudits", "sections"), breakdown),
+    sectionAudits,
     sectionImprovements: toSectionImprovements(pick(o, "section_improvements", "sectionImprovements", "section_fixes", "actionable_improvements")),
     placementTips: strArr(pick(o, "placement_tips", "placementTips", "interview_tips", "tips")),
     assumedRole: inferredRole,

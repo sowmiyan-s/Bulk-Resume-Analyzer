@@ -443,22 +443,53 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
 
     if (data.provider === "qwen") {
       try {
-        const res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+        // Try China main gateway first, then International
+        let res = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${key}`,
           },
           body: JSON.stringify({
-            model: "qwen-turbo",
+            model: "qwen-plus",
             messages: [{ role: "user", content: "ping" }],
             max_tokens: 5,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(10000),
         });
+
+        if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404)) {
+          res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${key}`,
+            },
+            body: JSON.stringify({
+              model: "qwen-plus",
+              messages: [{ role: "user", content: "ping" }],
+              max_tokens: 5,
+            }),
+            signal: AbortSignal.timeout(10000),
+          });
+        }
+
         if (res.ok) return { success: true, message: "Qwen / Alibaba DashScope API key is valid and working!" };
         const err = await res.text().catch(() => "");
-        return { success: false, message: `Qwen DashScope check failed (${res.status}): ${err}` };
+        if (err.includes("AccessDenied.Unpurchased") || res.status === 403) {
+          return {
+            success: false,
+            message:
+              "Qwen key is authenticated, but your Alibaba account has not claimed free trial tokens yet. Please visit https://home.qwencloud.com/benefits to activate your 2,000,000 free tokens.",
+          };
+        }
+        if (err.includes("Incorrect API key") || res.status === 401) {
+          return {
+            success: false,
+            message: "Invalid Qwen API key. Please generate a new key from https://home.qwencloud.com/benefits.",
+          };
+        }
+        return { success: false, message: `Qwen DashScope check failed (${res.status}): ${err.slice(0, 120)}` };
       } catch (e) {
         return { success: false, message: `Qwen connection failed: ${String(e)}` };
       }
@@ -474,9 +505,9 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
           },
           signal: AbortSignal.timeout(15000),
         });
-        if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working!" };
+        if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working (100% Free · 500+ tok/s)!" };
         const err = await res.text().catch(() => "");
-        return { success: false, message: `Groq check failed (${res.status}): ${err}` };
+        return { success: false, message: `Groq check failed (${res.status}): ${err.slice(0, 120)}` };
       } catch (e) {
         return { success: false, message: `Groq connection failed: ${String(e)}` };
       }
@@ -493,10 +524,16 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
           signal: AbortSignal.timeout(15000),
         });
         if (res.ok) {
-          return { success: true, message: "Cerebras API key is valid and working!" };
+          return { success: true, message: "Cerebras Wafer-Scale API key is valid and working!" };
         }
         const err = await res.text().catch(() => "");
-        return { success: false, message: `Cerebras check failed (${res.status}): ${err}` };
+        if (res.status === 402) {
+          return {
+            success: false,
+            message: "Cerebras key authenticated, but free trial credits are exhausted (HTTP 402).",
+          };
+        }
+        return { success: false, message: `Cerebras check failed (${res.status}): ${err.slice(0, 120)}` };
       } catch (e) {
         return { success: false, message: `Cerebras connection failed: ${String(e)}` };
       }
@@ -515,7 +552,7 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
         });
         if (res.ok) return { success: true, message: "OpenRouter API key is valid and working!" };
         const err = await res.text().catch(() => "");
-        return { success: false, message: `OpenRouter check failed (${res.status}): ${err}` };
+        return { success: false, message: `OpenRouter check failed (${res.status}): ${err.slice(0, 120)}` };
       } catch (e) {
         return { success: false, message: `OpenRouter connection failed: ${String(e)}` };
       }
@@ -541,14 +578,14 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
           return { success: true, message: "Google Gemini API key is valid and working!" };
         }
         const errText = await res.text().catch(() => "");
-        return { success: false, message: `Gemini API check failed (${res.status}): ${errText}` };
+        return { success: false, message: `Gemini API check failed (${res.status}): ${errText.slice(0, 120)}` };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { success: false, message: `Gemini connection failed: ${msg}` };
       }
     }
 
-    // Default: NVIDIA
+    // Default: NVIDIA NIM
     try {
       const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
         method: "POST",
@@ -557,7 +594,7 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
-          model: "meta/llama-3.3-70b-instruct",
+          model: "google/diffusiongemma-26b-a4b-it",
           messages: [{ role: "user", content: "ping" }],
           max_tokens: 5,
         }),
@@ -565,10 +602,10 @@ export const testApiKeyFn = createServerFn({ method: "POST" })
       });
 
       if (res.ok) {
-        return { success: true, message: "NVIDIA NIM API key is valid and working!" };
+        return { success: true, message: "NVIDIA NIM API key is valid and working (TensorRT Accelerated)!" };
       }
       const errText = await res.text().catch(() => "");
-      return { success: false, message: `NVIDIA API check failed (${res.status}): ${errText}` };
+      return { success: false, message: `NVIDIA API check failed (${res.status}): ${errText.slice(0, 120)}` };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { success: false, message: `NVIDIA connection failed: ${msg}` };

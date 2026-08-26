@@ -451,17 +451,27 @@ function Index() {
 
   const runBatch = useCallback(() => {
     const activeM = findModel(settings.modelId);
+    const hasAnyServerKey =
+      Boolean(systemInfo.hasServerNvidiaKey) ||
+      Boolean(systemInfo.hasServerGroqKey) ||
+      Boolean(systemInfo.hasServerQwenKey) ||
+      Boolean(systemInfo.hasServerOpenRouterKey) ||
+      Boolean(systemInfo.hasServerCerebrasKey) ||
+      Boolean(systemInfo.hasServerGeminiKey);
+
     const hasKey =
       activeM.provider === "litellm" ||
       activeM.provider === "openai-compatible" ||
       activeM.provider === "ollama" ||
       Boolean(settings.apiKey.trim()) ||
       Boolean(settings.proxyUrl.trim()) ||
+      (activeM.provider === "qwen" && Boolean(systemInfo.hasServerQwenKey)) ||
       (activeM.provider === "groq" && Boolean(systemInfo.hasServerGroqKey)) ||
       (activeM.provider === "cerebras" && Boolean(systemInfo.hasServerCerebrasKey)) ||
       (activeM.provider === "openrouter" && Boolean(systemInfo.hasServerOpenRouterKey)) ||
-      (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
-      (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
+      (activeM.provider === "nvidia" && Boolean(systemInfo.hasServerNvidiaKey)) ||
+      (activeM.provider === "gemini" && Boolean(systemInfo.hasServerGeminiKey)) ||
+      hasAnyServerKey;
 
     if (!hasKey) {
       toast.error(
@@ -735,17 +745,27 @@ function Index() {
       const activeJd = useJd && jd.trim() ? jd.trim() : undefined;
 
       const activeM = findModel(settings.modelId);
+      const hasAnyServerKey =
+        Boolean(systemInfo.hasServerNvidiaKey) ||
+        Boolean(systemInfo.hasServerGroqKey) ||
+        Boolean(systemInfo.hasServerQwenKey) ||
+        Boolean(systemInfo.hasServerOpenRouterKey) ||
+        Boolean(systemInfo.hasServerCerebrasKey) ||
+        Boolean(systemInfo.hasServerGeminiKey);
+
       const hasKey =
         activeM.provider === "litellm" ||
         activeM.provider === "openai-compatible" ||
         activeM.provider === "ollama" ||
         Boolean(settings.apiKey.trim()) ||
         Boolean(settings.proxyUrl.trim()) ||
+        (activeM.provider === "qwen" && Boolean(systemInfo.hasServerQwenKey)) ||
         (activeM.provider === "groq" && Boolean(systemInfo.hasServerGroqKey)) ||
         (activeM.provider === "cerebras" && Boolean(systemInfo.hasServerCerebrasKey)) ||
         (activeM.provider === "openrouter" && Boolean(systemInfo.hasServerOpenRouterKey)) ||
-        (activeM.provider === "nvidia" && systemInfo.hasServerNvidiaKey) ||
-        (activeM.provider === "gemini" && systemInfo.hasServerGeminiKey);
+        (activeM.provider === "nvidia" && Boolean(systemInfo.hasServerNvidiaKey)) ||
+        (activeM.provider === "gemini" && Boolean(systemInfo.hasServerGeminiKey)) ||
+        hasAnyServerKey;
 
       if (!hasKey) {
         toast.error(
