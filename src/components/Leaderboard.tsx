@@ -498,44 +498,45 @@ export function Leaderboard({
         </div>
       )}
 
-      <div className="panel overflow-hidden">
+      <div className="panel overflow-hidden border border-border/80 rounded-2xl shadow-xs">
         <div className="overflow-x-auto">
           <Table>
-            <TableHeader className="bg-secondary/40">
-              <TableRow className="border-b border-border hover:bg-transparent">
-                <TableHead className="w-10 text-center">
-                  <Checkbox
-                    checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
-                    onCheckedChange={toggleSelectAll}
-                    aria-label="Select all candidates"
-                    className="translate-y-0.5"
-                  />
+            <TableHeader className="bg-secondary/30">
+              <TableRow className="border-b border-border/80 hover:bg-transparent">
+                <TableHead className="w-12 px-3 text-center">
+                  <div className="flex items-center justify-center">
+                    <Checkbox
+                      checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all candidates"
+                    />
+                  </div>
                 </TableHead>
-                <TableHead className="w-10 text-xs font-semibold text-muted-foreground">
+                <TableHead className="w-12 text-center text-xs font-semibold text-muted-foreground">
                   #
                 </TableHead>
-                <Th k="name">Candidate &amp; Target Role</Th>
-                <Th k="score" className="w-24">
+                <Th k="name" className="min-w-[180px]">Candidate &amp; Target Role</Th>
+                <Th k="score" className="w-24 text-center">
                   Score
                 </Th>
-                <Th k="tier" className="w-32">
+                <Th k="tier" className="w-36">
                   Readiness / Status
                 </Th>
-                <Th k="structure" className="w-24">
+                <Th k="structure" className="w-24 text-center">
                   Structure
                 </Th>
-                <Th k="jd" className="w-20">
+                <Th k="jd" className="w-20 text-center">
                   JD Fit
                 </Th>
                 <Th k="issues" className="w-24">
                   Critical
                 </Th>
-                <TableHead className="w-28 text-right text-xs font-semibold text-muted-foreground">
+                <TableHead className="w-28 text-right text-xs font-semibold text-muted-foreground pr-4">
                   Actions
                 </TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody className="divide-y divide-border">
+            <TableBody className="divide-y divide-border/60">
               {sorted.length === 0 && (
                 <TableRow>
                   <TableCell
@@ -565,16 +566,31 @@ export function Leaderboard({
                     }`}
                     onClick={() => onOpen(row.id)}
                   >
-                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelectRow(row.id)}
-                        aria-label={`Select candidate ${a.candidateName}`}
-                        className="translate-y-0.5"
-                      />
+                    <TableCell
+                      className="w-12 px-3 text-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectRow(row.id);
+                      }}
+                    >
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              if (checked) next.add(row.id);
+                              else next.delete(row.id);
+                              return next;
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`Select candidate ${a.candidateName}`}
+                        />
+                      </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
+                    <TableCell className="w-12 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
                         {index < 3 ? (
                           <Trophy className={`size-4 ${rankMedal(index + 1)}`} />
                         ) : (

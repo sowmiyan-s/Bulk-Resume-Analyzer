@@ -46,13 +46,13 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const clearLocalAndReset = () => {
     if (typeof window !== "undefined") {
       try {
-        window.localStorage.removeItem("resume-radiance.results.v1");
+        window.localStorage.clear();
+        window.sessionStorage.clear();
       } catch {
         /* ignore */
       }
+      window.location.href = "/";
     }
-    router.invalidate();
-    reset();
   };
 
   return (

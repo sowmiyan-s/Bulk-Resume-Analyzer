@@ -71,234 +71,351 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-  const M = 44;
+  const M = 40;
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const BODY = W - M * 2;
   let y = M;
 
-  const ensure = (needed = 16) => {
-    if (y + needed > H - M) {
-      doc.addPage();
-      y = M;
+  const score = effectiveScore(a);
+  const tone: [number, number, number] =
+    score >= 75 ? [16, 149, 103] : score >= 55 ? [217, 119, 6] : [220, 38, 38];
+  const [tr, tg, tb] = tone;
+
+  const drawPageHeader = (pageNum: number) => {
+    if (pageNum > 1) {
+      doc.setFillColor(248, 250, 252).rect(0, 0, W, 36, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.8).line(0, 36, W, 36);
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
+      doc.text(`${a.candidateName || "Candidate"} — Placement Audit Report`, M, 22);
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(148, 163, 184);
+      doc.text(`Score: ${score}/100`, W - M, 22, { align: "right" });
     }
   };
 
-  const text = (s: string, size = 10, style: "normal" | "bold" = "normal", indent = 0) => {
+  const ensure = (needed = 20) => {
+    if (y + needed > H - M - 20) {
+      doc.addPage();
+      drawPageHeader(doc.getNumberOfPages());
+      y = 52;
+    }
+  };
+
+  const heading = (title: string) => {
+    ensure(36);
+    y += 10;
+    doc.setFillColor(241, 245, 249).roundedRect(M, y, BODY, 20, 3, 3, "F");
+    doc.setFillColor(tr, tg, tb).rect(M, y, 4, 20, "F");
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(30, 41, 59);
+    doc.text(title.toUpperCase(), M + 12, y + 14);
+    y += 28;
+  };
+
+  const textBlock = (
+    s: string,
+    size = 9.5,
+    style: "normal" | "bold" | "italic" = "normal",
+    color: [number, number, number] = [51, 65, 85],
+    indent = 0,
+  ) => {
     if (!s) return;
-    doc.setFont("helvetica", style).setFontSize(size).setTextColor(40);
-    for (const line of doc.splitTextToSize(s, BODY - indent) as string[]) {
-      ensure(size + 5);
+    doc.setFont("helvetica", style).setFontSize(size).setTextColor(color[0], color[1], color[2]);
+    const lines = doc.splitTextToSize(s, BODY - indent) as string[];
+    for (const line of lines) {
+      ensure(size + 6);
       doc.text(line, M + indent, y);
       y += size + 4;
     }
   };
 
-  const heading = (s: string) => {
-    ensure(34);
-    y += 10;
-    doc.setFont("helvetica", "bold").setFontSize(11.5).setTextColor(20);
-    doc.text(s.toUpperCase(), M, y);
-    y += 6;
-    doc
-      .setDrawColor(210)
-      .setLineWidth(0.7)
-      .line(M, y, M + BODY, y);
-    y += 13;
-  };
-
-  const bullets = (items: string[], indent = 12) => {
+  const bulletList = (items: string[], indent = 12) => {
     if (!items.length) {
-      text("None reported.", 9.5, "normal", indent);
+      textBlock("None reported.", 9, "italic", [148, 163, 184], indent);
       return;
     }
     for (const item of items) {
       if (!item) continue;
-      doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(45);
-      const lines = doc.splitTextToSize(item, BODY - indent - 12) as string[];
+      ensure(18);
+      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(tr, tg, tb);
+      doc.text("\u2022", M + indent, y);
+      doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(51, 65, 85);
+      const lines = doc.splitTextToSize(item, BODY - indent - 14) as string[];
       lines.forEach((line, i) => {
-        ensure(15);
-        if (i === 0) doc.text("\u2022", M + indent, y);
+        if (i > 0) ensure(14);
         doc.text(line, M + indent + 12, y);
-        y += 13.5;
+        y += 13;
       });
       y += 2;
     }
   };
 
-  const score = effectiveScore(a);
-  const tone: [number, number, number] =
-    score >= 75 ? [22, 130, 70] : score >= 55 ? [190, 130, 15] : [190, 45, 45];
-  const [tr, tg, tb] = tone;
+  // ================= 1. EXECUTIVE HEADER BANNER =================
+  doc.setFillColor(15, 23, 42).rect(0, 0, W, 105, "F");
 
-  // Header band
-  doc.setFillColor(24, 28, 38).rect(0, 0, W, 96, "F");
-  doc.setFont("helvetica", "bold").setFontSize(19).setTextColor(255);
-  doc.text(a.candidateName || "Unnamed candidate", M, 42);
-  doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(196);
-  doc.text(`${a.role || "—"}   ·   ${fileName}`, M, 61);
-  doc.setFontSize(8.5).setTextColor(150);
-  doc.text(`Generated ${new Date().toLocaleString()}`, M, 78);
+  // Candidate Name & Role
+  doc.setFont("helvetica", "bold").setFontSize(18).setTextColor(255, 255, 255);
+  doc.text(a.candidateName || "Unnamed Candidate", M, 36);
 
-  doc.setFont("helvetica", "bold").setFontSize(30).setTextColor(tr, tg, tb);
-  doc.text(String(score), W - M, 48, { align: "right" });
-  doc.setFontSize(8).setTextColor(190);
-  doc.text("/ 100", W - M, 62, { align: "right" });
+  doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(203, 213, 225);
+  doc.text(`${a.role || "Software Engineering"} · ${fileName}`, M, 54);
 
-  y = 122;
-  doc.setFont("helvetica", "bold").setFontSize(11).setTextColor(tr, tg, tb);
-  doc.text(a.readinessTier, M, y);
-  y += 8;
-  if (a.jdScore !== null) {
-    doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(70);
-    doc.text(`JD fit: ${a.jdScore}/100`, W - M, y - 8, { align: "right" });
-  }
-  if (a.manualScore !== null) {
-    doc.setFont("helvetica", "italic").setFontSize(8.5).setTextColor(120);
-    y += 12;
-    doc.text(`Officer override applied (AI score was ${a.overallScore}).`, M, y);
-  }
-  y += 8;
+  doc.setFontSize(8).setTextColor(148, 163, 184);
+  const evalDate = new Date().toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+  doc.text(`Placement Evaluation · Generated ${evalDate}`, M, 70);
 
-  if (a.recruiterFirstImpression) {
-    heading("Recruiter's 6-second impression");
-    text(a.recruiterFirstImpression, 10.5, "normal");
-  }
-  if (a.hrVerdict) {
-    heading("HR verdict");
-    text(a.hrVerdict, 10.5, "normal");
-  }
-
-  // v2: evaluation framing + structure + data gaps + relevance
+  // Evaluation basis pill in header
   if (a.evaluationBasis) {
-    const basisLabel =
+    const basisText =
       a.evaluationBasis === "jd-fit"
-        ? "Evaluated against the supplied job description"
-        : `Evaluated against default role: ${a.assumedRole || "—"}`;
-    text(basisLabel, 9, "bold");
+        ? `JD-Aligned Assessment`
+        : `Role Benchmark: ${a.assumedRole || "Standard"}`;
+    doc.setFillColor(30, 41, 59).roundedRect(M, 80, 190, 14, 3, 3, "F");
+    doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(148, 163, 184);
+    doc.text(basisText, M + 8, 90);
   }
-  if (a.structure && a.structure.score > 0) {
-    heading("Resume structure & scannability");
-    text(`Score: ${a.structure.score}/100 (${a.structure.label})`, 9.5, "bold");
-    if (a.structure.notes.length) bullets(a.structure.notes);
+
+  // Right Score Card in Header
+  const scoreBoxW = 100;
+  const scoreBoxX = W - M - scoreBoxW;
+  doc.setFillColor(30, 41, 59).roundedRect(scoreBoxX, 18, scoreBoxW, 72, 6, 6, "F");
+
+  doc.setFont("helvetica", "bold").setFontSize(26).setTextColor(tr, tg, tb);
+  doc.text(String(score), scoreBoxX + scoreBoxW / 2, 48, { align: "center" });
+
+  doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(148, 163, 184);
+  doc.text("OUT OF 100", scoreBoxX + scoreBoxW / 2, 59, { align: "center" });
+
+  if (a.jdScore !== null) {
+    doc.setFillColor(tr, tg, tb).roundedRect(scoreBoxX + 10, 65, scoreBoxW - 20, 14, 3, 3, "F");
+    doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(255, 255, 255);
+    doc.text(`JD Match: ${a.jdScore}%`, scoreBoxX + scoreBoxW / 2, 75, { align: "center" });
   }
-  if (a.dataGaps.length) {
-    heading("Missing information (hurts shortlisting)");
-    for (const g of a.dataGaps) {
-      text(`${g.area}: ${g.missing}${g.impact ? ` — impact: ${g.impact}` : ""}`, 9.5, "normal", 12);
+
+  y = 120;
+
+  // Tier Badge Bar
+  doc.setFillColor(score >= 75 ? 240 : score >= 55 ? 254 : 254, score >= 75 ? 253 : score >= 55 ? 243 : 242, score >= 75 ? 244 : score >= 55 ? 199 : 242).roundedRect(M, y, BODY, 24, 4, 4, "F");
+  doc.setDrawColor(tr, tg, tb).setLineWidth(0.8).roundedRect(M, y, BODY, 24, 4, 4, "S");
+  doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(tr, tg, tb);
+  doc.text(a.readinessTier, M + 12, y + 16);
+  if (a.manualScore !== null) {
+    doc.setFont("helvetica", "italic").setFontSize(8).setTextColor(100, 116, 139);
+    doc.text(`(Manual Override Applied: AI Score ${a.overallScore})`, W - M - 12, y + 16, { align: "right" });
+  }
+  y += 34;
+
+  // ================= 2. RECRUITER & HR VERDICTS =================
+  if (a.recruiterFirstImpression || a.hrVerdict) {
+    heading("Recruiter & Placement Committee Verdict");
+    if (a.recruiterFirstImpression) {
+      ensure(38);
+      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, 32, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, 32, 4, 4, "S");
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
+      doc.text("6-SECOND RECRUITER SCAN:", M + 10, y + 13);
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
+      const impLines = doc.splitTextToSize(a.recruiterFirstImpression, BODY - 20) as string[];
+      doc.text(impLines[0] || "", M + 10, y + 25);
+      y += 38;
     }
-  }
-  if (a.relevance && a.relevance.verdict) {
-    heading("Role relevance");
-    if (a.relevance.assumedRole) text(`Basis role: ${a.relevance.assumedRole}`, 9.5, "bold");
-    if (a.relevance.skillsMisaligned)
-      text(
-        "Warning: listed skills look disconnected from the project/experience shown.",
-        9.5,
-        "bold",
-      );
-    text(a.relevance.verdict, 10.5, "normal");
-  }
-  if (a.scoreBreakdown.length) {
-    heading("Score breakdown");
-    for (const row of a.scoreBreakdown) {
-      ensure(30);
-      doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor(35);
-      doc.text(row.category, M, y);
-      doc.text(`${row.score}/${row.max}`, M + BODY, y, { align: "right" });
-      y += 7;
-      const pct = row.max > 0 ? Math.max(0, Math.min(1, row.score / row.max)) : 0;
-      doc.setFillColor(232, 232, 232).rect(M, y, BODY, 4.5, "F");
-      const bar: [number, number, number] =
-        pct >= 0.75 ? [22, 130, 70] : pct >= 0.5 ? [190, 130, 15] : [190, 45, 45];
-      doc.setFillColor(bar[0], bar[1], bar[2]);
-      doc.rect(M, y, BODY * pct, 4.5, "F");
-      y += 11;
-      if (row.note) text(row.note, 8.5, "normal", 0);
-      y += 3;
+    if (a.hrVerdict) {
+      ensure(38);
+      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, 32, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, 32, 4, 4, "S");
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
+      doc.text("PLACEMENT VERDICT & HIRING RECOMMENDATION:", M + 10, y + 13);
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
+      const vLines = doc.splitTextToSize(a.hrVerdict, BODY - 20) as string[];
+      doc.text(vLines[0] || "", M + 10, y + 25);
+      y += 38;
     }
   }
 
-  if (a.criticalIssues.length) {
-    heading("What is holding this resume back");
+  // ================= 3. DETERMINISTIC ATS METRICS GRID =================
+  if (a.ats) {
+    heading("ATS Engine Audit & Technical Metrics");
+    const m = a.ats.metrics;
+
+    // 4 metric cards
+    ensure(42);
+    const cardW = (BODY - 24) / 4;
+    const cards = [
+      { label: "Word Count", val: `${m.words} words`, sub: `≈ ${m.estimatedPages} page(s)` },
+      { label: "Bullet Points", val: `${m.bullets}`, sub: `avg ${m.readabilityWordsPerBullet} w/bullet` },
+      { label: "Quantified Impact", val: `${m.quantifiedBullets}/${m.bullets || 1}`, sub: `${m.bullets ? Math.round((m.quantifiedBullets / m.bullets) * 100) : 0}% measurable` },
+      { label: "Action Verbs", val: `${m.actionVerbBullets}/${m.bullets || 1}`, sub: `${m.bullets ? Math.round((m.actionVerbBullets / m.bullets) * 100) : 0}% strong starts` },
+    ];
+
+    cards.forEach((c, idx) => {
+      const cx = M + idx * (cardW + 8);
+      doc.setFillColor(248, 250, 252).roundedRect(cx, y, cardW, 36, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(cx, y, cardW, 36, 4, 4, "S");
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(100, 116, 139);
+      doc.text(c.label.toUpperCase(), cx + 8, y + 11);
+      doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 23, 42);
+      doc.text(c.val, cx + 8, y + 23);
+      doc.setFont("helvetica", "normal").setFontSize(7).setTextColor(148, 163, 184);
+      doc.text(c.sub, cx + 8, y + 32);
+    });
+    y += 44;
+
+    // ATS Category Progress Bars
+    for (const cat of a.ats.categories) {
+      ensure(22);
+      const catPct = cat.max > 0 ? Math.max(0, Math.min(1, cat.score / cat.max)) : 0;
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(51, 65, 85);
+      doc.text(cat.label, M, y);
+      doc.text(`${cat.score}/${cat.max} pts`, M + BODY, y, { align: "right" });
+      y += 5;
+
+      doc.setFillColor(226, 232, 240).roundedRect(M, y, BODY, 4, 2, 2, "F");
+      const cTone: [number, number, number] =
+        catPct >= 0.75 ? [16, 149, 103] : catPct >= 0.5 ? [217, 119, 6] : [220, 38, 38];
+      doc.setFillColor(cTone[0], cTone[1], cTone[2]).roundedRect(M, y, BODY * catPct, 4, 2, 2, "F");
+      y += 12;
+    }
+  }
+
+  // ================= 4. CRITICAL ISSUES & BLOCKERS =================
+  if (a.criticalIssues.length || (a.ats?.blockers && a.ats.blockers.length > 0)) {
+    heading("Critical Resume Blockers & Actionable Fixes");
+
+    if (a.ats?.blockers && a.ats.blockers.length > 0) {
+      for (const b of a.ats.blockers) {
+        ensure(24);
+        doc.setFillColor(254, 242, 242).roundedRect(M, y, BODY, 20, 3, 3, "F");
+        doc.setDrawColor(254, 202, 202).setLineWidth(0.5).roundedRect(M, y, BODY, 20, 3, 3, "S");
+        doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(220, 38, 38);
+        doc.text("⚠️ ATS HARD BLOCKER:", M + 8, y + 13);
+        doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(127, 29, 29);
+        const bText = doc.splitTextToSize(b, BODY - 130) as string[];
+        doc.text(bText[0] || "", M + 120, y + 13);
+        y += 24;
+      }
+    }
+
     for (const issue of a.criticalIssues) {
-      ensure(40);
-      doc.setFont("helvetica", "bold").setFontSize(9.5);
-      const sev: [number, number, number] =
-        issue.severity === "critical"
-          ? [190, 45, 45]
-          : issue.severity === "major"
-            ? [190, 130, 15]
-            : [95, 95, 95];
-      doc.setTextColor(sev[0], sev[1], sev[2]);
-      doc.text(`[${issue.severity.toUpperCase()}] ${issue.area}`, M, y);
-      y += 13;
-      text(issue.problem, 9.5, "normal", 12);
-      if (issue.evidence) text(`Resume says: "${issue.evidence}"`, 8.5, "normal", 12);
-      if (issue.fix) text(`Fix: ${issue.fix}`, 9.5, "bold", 12);
-      y += 6;
+      ensure(52);
+      const isCrit = issue.severity === "critical";
+      const isMaj = issue.severity === "major";
+      const badgeBg: [number, number, number] = isCrit ? [254, 242, 242] : isMaj ? [254, 243, 199] : [241, 245, 249];
+      const badgeText: [number, number, number] = isCrit ? [220, 38, 38] : isMaj ? [180, 83, 9] : [71, 85, 105];
+
+      doc.setFillColor(badgeBg[0], badgeBg[1], badgeBg[2]).roundedRect(M, y, BODY, 46, 4, 4, "F");
+      doc.setDrawColor(badgeText[0], badgeText[1], badgeText[2]).setLineWidth(0.5).roundedRect(M, y, BODY, 46, 4, 4, "S");
+
+      doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(badgeText[0], badgeText[1], badgeText[2]);
+      doc.text(`[${issue.severity.toUpperCase()}] ${issue.area}`, M + 10, y + 12);
+
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
+      const pLines = doc.splitTextToSize(issue.problem, BODY - 20) as string[];
+      doc.text(pLines[0] || "", M + 10, y + 24);
+
+      if (issue.fix) {
+        doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(16, 149, 103);
+        const fixLines = doc.splitTextToSize(`Action: ${issue.fix}`, BODY - 20) as string[];
+        doc.text(fixLines[0] || "", M + 10, y + 36);
+      }
+      y += 52;
     }
   }
 
-  if (a.strengths.length) {
-    heading("Strengths");
-    bullets(a.strengths);
+  // ================= 5. SKILL MATRIX & TECH STACK =================
+  heading("Technical Skills & Placement Gap Analysis");
+
+  if (a.skillMatrix.matched.length) {
+    ensure(20);
+    doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(16, 149, 103);
+    doc.text("✓ Verified Technical Skills Found in Resume:", M, y);
+    y += 12;
+    textBlock(a.skillMatrix.matched.join(" · "), 8.5, "normal", [51, 65, 85], 10);
+    y += 4;
   }
 
-  heading("Skill matrix");
-  text("Matched", 10, "bold");
-  bullets(a.skillMatrix.matched.length ? [a.skillMatrix.matched.join(", ")] : []);
-  text("Missing", 10, "bold");
-  bullets(a.skillMatrix.missing.length ? [a.skillMatrix.missing.join(", ")] : []);
+  if (a.skillMatrix.missing.length) {
+    ensure(20);
+    doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(220, 38, 38);
+    doc.text("✗ Missing Target Role / JD Keywords:", M, y);
+    y += 12;
+    textBlock(a.skillMatrix.missing.join(" · "), 8.5, "normal", [127, 29, 29], 10);
+    y += 4;
+  }
+
   if (a.skillMatrix.recommended.length) {
-    text("Learn next (highest hiring impact first)", 10, "bold");
-    bullets(a.skillMatrix.recommended);
+    ensure(20);
+    doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(217, 119, 6);
+    doc.text("⚡ Highest Placement Impact Skills to Acquire Next:", M, y);
+    y += 12;
+    textBlock(a.skillMatrix.recommended.join(" · "), 8.5, "normal", [120, 53, 15], 10);
+    y += 6;
   }
 
+  // ================= 6. BULLET REWRITES =================
   if (a.bulletRewrites.length) {
-    heading("Rewrite these bullets");
+    heading("Actionable Bullet Point Transformations");
     for (const r of a.bulletRewrites) {
-      ensure(46);
-      text("Before", 9, "bold", 12);
-      text(r.original, 9.5, "normal", 24);
-      text("After", 9, "bold", 12);
-      doc.setTextColor(22, 130, 70);
-      text(r.rewritten, 9.5, "normal", 24);
-      if (r.reason) text(`Why: ${r.reason}`, 8.5, "normal", 24);
-      y += 7;
+      ensure(58);
+      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, 54, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, 54, 4, 4, "S");
+
+      // Before
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(220, 38, 38);
+      doc.text("BEFORE (WEAK):", M + 10, y + 12);
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(100, 116, 139);
+      const bLines = doc.splitTextToSize(r.original, BODY - 100) as string[];
+      doc.text(bLines[0] || "", M + 90, y + 12);
+
+      // After
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(16, 149, 103);
+      doc.text("AFTER (IMPACT):", M + 10, y + 26);
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(15, 23, 42);
+      const aLines = doc.splitTextToSize(r.rewritten, BODY - 100) as string[];
+      doc.text(aLines[0] || "", M + 90, y + 26);
+
+      // Rationale
+      if (r.reason) {
+        doc.setFont("helvetica", "italic").setFontSize(7.5).setTextColor(71, 85, 105);
+        const rLines = doc.splitTextToSize(`Why: ${r.reason}`, BODY - 20) as string[];
+        doc.text(rLines[0] || "", M + 10, y + 42);
+      }
+      y += 60;
     }
   }
 
-  if (a.techImprovementIdeas.length) {
-    heading("Technical improvement plan");
-    bullets(a.techImprovementIdeas);
-  }
-  if (a.projectSuggestions.length) {
-    heading("Projects that would move the needle");
-    bullets(a.projectSuggestions);
-  }
-  if (a.grammarAndOcrErrors.length) {
-    heading("Grammar, spelling & OCR errors");
-    bullets(a.grammarAndOcrErrors);
-  }
-  if (a.formattingProblems.length) {
-    heading("ATS formatting problems");
-    bullets(a.formattingProblems);
-  }
-  if (a.officerNotes) {
-    heading("Placement officer notes");
-    text(a.officerNotes, 10, "normal");
+  // ================= 7. IMPROVEMENT PLAN & SUGGESTIONS =================
+  if (a.techImprovementIdeas.length || a.projectSuggestions.length) {
+    heading("Placement Enhancement Roadmap");
+    if (a.techImprovementIdeas.length) {
+      ensure(16);
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(30, 41, 59);
+      doc.text("Key Technical Upgrades:", M, y);
+      y += 12;
+      bulletList(a.techImprovementIdeas, 8);
+    }
+    if (a.projectSuggestions.length) {
+      ensure(16);
+      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(30, 41, 59);
+      doc.text("Recommended Portfolio Projects:", M, y);
+      y += 12;
+      bulletList(a.projectSuggestions, 8);
+    }
   }
 
-  // Page numbers
-  const pages = doc.getNumberOfPages();
-  for (let p = 1; p <= pages; p++) {
+  // ================= FOOTER & PAGE NUMBERS =================
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
-    doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(150);
-    doc.text(`Page ${p} of ${pages}`, W / 2, H - 22, { align: "center" });
+    doc.setDrawColor(226, 232, 240).setLineWidth(0.5).line(M, H - 28, W - M, H - 28);
+    doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(148, 163, 184);
+    doc.text("VSB Placement Cell · AI & Deterministic Resume Intelligence", M, H - 16);
+    doc.text(`Page ${p} of ${totalPages}`, W - M, H - 16, { align: "right" });
   }
 
-  doc.save(`${safeName(a.candidateName || fileName)}-scorecard.pdf`);
+  doc.save(`${safeName(a.candidateName || fileName)}-placement-audit.pdf`);
 }
 
 /* ------------------------------- markdown ------------------------------- */

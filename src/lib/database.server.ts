@@ -1,6 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getDb, pingMongo } from "./mongodb.server";
 import type { Analysis } from "./analysis-types";
+
+async function getDb() {
+  const { getDb: dbFn } = await import("./mongodb.server");
+  return dbFn();
+}
+
+async function pingMongo() {
+  const { pingMongo: pingFn } = await import("./mongodb.server");
+  return pingFn();
+}
 
 export interface StoredMongoAnalysis {
   id: string;
@@ -34,14 +43,14 @@ export interface AdminSystemSettings {
 
 const DEFAULT_ADMIN_PASS = "123321";
 
-function checkAdminPassword(providedPass?: string): boolean {
+export function checkAdminPassword(providedPass?: string): boolean {
   if (!providedPass) return false;
   const p = providedPass.trim();
   const envPass =
     (typeof process !== "undefined" &&
       process.env &&
       (process.env["ADMIN_PASSWORD"] || process.env["VITE_ADMIN_PASSWORD"])) ||
-    (process.env?.["NODE_ENV"] === "development" ? "123321" : "");
+    DEFAULT_ADMIN_PASS;
   return Boolean(envPass && p === envPass.trim());
 }
 
@@ -56,65 +65,66 @@ function isMasked(key?: string): boolean {
   return typeof key === "string" && key.includes("••••");
 }
 
-/* ------------------------------- Analyses API ------------------------------- */
+/* ------------------------------- Pure Database Operations ------------------------------- */
 
-/** Save / Upsert analysis record to MongoDB Atlas */
-export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
-  .validator(
-    (data: {
-      id: string;
-      fileName: string;
-      analysis: Analysis;
-      cleanText?: string | undefined;
-      rawText?: string | undefined;
-    }) => data,
-  )
-  .handler(async ({ data }) => {
-    try {
-      const db = await getDb();
-      const col = db.collection<StoredMongoAnalysis>("analyses");
+/** Save or Upsert an analysis record directly into MongoDB */
+export async function saveAnalysisMongo(data: {
+  id: string;
+  fileName: string;
+  analysis: Analysis;
+  cleanText?: string | undefined;
+  rawText?: string | undefined;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection<StoredMongoAnalysis>("analyses");
 
-      // Ensure indexes exist for rapid ranking
-      await col.createIndex({ overall_score: -1 }).catch(() => {});
-      await col.createIndex({ created_at: -1 }).catch(() => {});
+    // Ensure indexes exist for rapid ranking & lookup
+    void Promise.allSettled([
+      col.createIndex({ id: 1 }, { unique: true }),
+      col.createIndex({ overall_score: -1 }),
+      col.createIndex({ created_at: -1 }),
+    ]);
 
-      const now = new Date().toISOString();
-      const doc: StoredMongoAnalysis = {
-        id: data.id,
-        file_name: data.fileName,
-        candidate_name: data.analysis.candidateName || "Unnamed candidate",
-        role: data.analysis.role || "—",
-        overall_score: data.analysis.overallScore || 0,
-        readiness_tier: data.analysis.readinessTier || "Tier 3: Overhaul Required",
-        evaluation_basis: data.analysis.evaluationBasis || "role-fit",
-        assumed_role: data.analysis.assumedRole || "",
-        jd_score: data.analysis.jdScore ?? null,
-        created_at: now,
-        updated_at: now,
-        clean_text: data.cleanText || "",
-        raw_text: data.rawText || "",
-        analysis: data.analysis,
-      };
+    const now = new Date().toISOString();
+    const updatePayload = {
+      file_name: data.fileName || "unknown.pdf",
+      candidate_name: data.analysis.candidateName || "Unnamed candidate",
+      role: data.analysis.role || "—",
+      overall_score: typeof data.analysis.overallScore === "number" ? data.analysis.overallScore : 0,
+      readiness_tier: data.analysis.readinessTier || "Tier 3: Overhaul Required",
+      evaluation_basis: data.analysis.evaluationBasis || "role-fit",
+      assumed_role: data.analysis.assumedRole || "",
+      jd_score: typeof data.analysis.jdScore === "number" ? data.analysis.jdScore : null,
+      updated_at: now,
+      clean_text: data.cleanText || "",
+      raw_text: data.rawText || "",
+      analysis: data.analysis,
+    };
 
-      await col.updateOne(
-        { id: data.id },
-        {
-          $set: doc,
-          $setOnInsert: { created_at: now },
-        },
-        { upsert: true },
-      );
+    await col.updateOne(
+      { id: data.id },
+      {
+        $set: updatePayload,
+        $setOnInsert: { id: data.id, created_at: now },
+      },
+      { upsert: true },
+    );
 
-      return { success: true, id: data.id };
-    } catch (err) {
-      console.error("[MongoDB] Failed to save analysis:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
-    }
-  });
+    return { success: true, id: data.id };
+  } catch (err) {
+    console.error("[MongoDB] Failed to save analysis:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
 
-/** Load all analysis records from MongoDB Atlas */
-export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(async () => {
+/** Load all analysis records directly from MongoDB */
+export async function loadAnalysesMongo(): Promise<{
+  success: boolean;
+  items: Array<Omit<StoredMongoAnalysis, "_id">>;
+  error?: string;
+}> {
   try {
     const db = await getDb();
     const col = db.collection<StoredMongoAnalysis>("analyses");
@@ -124,20 +134,21 @@ export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(asy
       .limit(1000)
       .toArray();
 
-    // Map _id away for clean serialization
+    // Clean serialization mapping
     const items = docs.map((d) => ({
       id: d.id,
-      file_name: d.file_name,
-      candidate_name: d.candidate_name,
-      role: d.role,
-      overall_score: d.overall_score,
-      readiness_tier: d.readiness_tier,
-      evaluation_basis: d.evaluation_basis,
-      assumed_role: d.assumed_role,
-      jd_score: d.jd_score,
-      created_at: d.created_at,
-      clean_text: d.clean_text,
-      raw_text: d.raw_text,
+      file_name: d.file_name || "candidate.pdf",
+      candidate_name: d.candidate_name || "Unnamed candidate",
+      role: d.role || "—",
+      overall_score: typeof d.overall_score === "number" ? d.overall_score : 0,
+      readiness_tier: d.readiness_tier || "Tier 3: Overhaul Required",
+      evaluation_basis: d.evaluation_basis || "role-fit",
+      assumed_role: d.assumed_role || "",
+      jd_score: typeof d.jd_score === "number" ? d.jd_score : null,
+      created_at: d.created_at || new Date().toISOString(),
+      updated_at: d.updated_at || d.created_at || new Date().toISOString(),
+      clean_text: d.clean_text || "",
+      raw_text: d.raw_text || "",
       analysis: d.analysis,
     }));
 
@@ -147,473 +158,238 @@ export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(asy
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, items: [], error: msg };
   }
-});
+}
 
-/** Delete a single analysis record from MongoDB Atlas */
-export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { id: string; passcode?: string }) => data)
-  .handler(async ({ data }) => {
-    try {
-      const db = await getDb();
-      const col = db.collection("analyses");
-      await col.deleteOne({ id: data.id });
-      return { success: true, message: "Record deleted from MongoDB." };
-    } catch (err) {
-      console.error("[MongoDB] Failed to delete analysis:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
+/** Delete single analysis directly from MongoDB */
+export async function deleteAnalysisMongo(data: {
+  id: string;
+  passcode?: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    await col.deleteOne({ id: data.id });
+    return { success: true, message: "Record deleted from MongoDB." };
+  } catch (err) {
+    console.error("[MongoDB] Failed to delete analysis:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Delete multiple analyses directly from MongoDB */
+export async function deleteManyAnalysesMongo(data: {
+  ids: string[];
+  passcode?: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    await col.deleteMany({ id: { $in: data.ids } });
+    return { success: true, message: `Deleted ${data.ids.length} records from MongoDB.` };
+  } catch (err) {
+    console.error("[MongoDB] Failed to delete analyses:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Clear all analyses directly from MongoDB */
+export async function clearAnalysesMongo(data?: {
+  adminPass?: string;
+  passcode?: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    await col.deleteMany({});
+    return { success: true, message: "Cleared all analyses in MongoDB." };
+  } catch (err) {
+    console.error("[MongoDB] Failed to clear analyses:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Save Admin Settings directly into MongoDB Vault */
+export async function saveAdminSettings(data: {
+  passcode: string;
+  settings: AdminSystemSettings;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  if (!checkAdminPassword(data.passcode)) {
+    return { success: false, error: "Invalid admin passcode." };
+  }
+
+  try {
+    const db = await getDb();
+    const col = db.collection("system_settings");
+
+    void col.createIndex({ key: 1 }, { unique: true }).catch(() => {});
+
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (data.settings.qwenApiKey !== undefined && !isMasked(data.settings.qwenApiKey)) {
+      updateData["qwenApiKey"] = data.settings.qwenApiKey.trim();
     }
-  });
-
-/** Delete multiple analysis records from MongoDB Atlas */
-export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { ids: string[]; passcode?: string }) => data)
-  .handler(async ({ data }) => {
-    try {
-      const db = await getDb();
-      const col = db.collection("analyses");
-      await col.deleteMany({ id: { $in: data.ids } });
-      return { success: true, message: `Deleted ${data.ids.length} records from MongoDB.` };
-    } catch (err) {
-      console.error("[MongoDB] Failed to delete analyses:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
+    if (data.settings.groqApiKey !== undefined && !isMasked(data.settings.groqApiKey)) {
+      updateData["groqApiKey"] = data.settings.groqApiKey.trim();
     }
-  });
-
-/** Clear all analysis records from MongoDB Atlas */
-export const clearAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { adminPass?: string; passcode?: string }) => data)
-  .handler(async ({ data }) => {
-    if (!checkAdminPassword(data.passcode || data.adminPass)) {
-      return { success: false, error: "Unauthorized: Invalid admin passcode." };
+    if (data.settings.cerebrasApiKey !== undefined && !isMasked(data.settings.cerebrasApiKey)) {
+      updateData["cerebrasApiKey"] = data.settings.cerebrasApiKey.trim();
     }
-    try {
-      const db = await getDb();
-      const col = db.collection("analyses");
-      await col.deleteMany({});
-      return { success: true, message: "Cleared all analyses in MongoDB." };
-    } catch (err) {
-      console.error("[MongoDB] Failed to clear analyses:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
+    if (data.settings.openrouterApiKey !== undefined && !isMasked(data.settings.openrouterApiKey)) {
+      updateData["openrouterApiKey"] = data.settings.openrouterApiKey.trim();
     }
-  });
-
-/* ------------------------------- Admin & System Settings ------------------------------- */
-
-/** Check Admin Password */
-export const verifyAdminPassFn = createServerFn({ method: "POST" })
-  .validator((data: { passcode: string }) => data)
-  .handler(async ({ data }) => {
-    const valid = checkAdminPassword(data.passcode);
-    return { valid };
-  });
-
-/** Save Admin System Settings & API Keys into MongoDB Vault */
-export const saveAdminSettingsFn = createServerFn({ method: "POST" })
-  .validator((data: { passcode: string; settings: AdminSystemSettings }) => data)
-  .handler(async ({ data }) => {
-    if (!checkAdminPassword(data.passcode)) {
-      return { success: false, error: "Invalid admin passcode." };
+    if (data.settings.nvidiaApiKey !== undefined && !isMasked(data.settings.nvidiaApiKey)) {
+      updateData["nvidiaApiKey"] = data.settings.nvidiaApiKey.trim();
     }
-
-    try {
-      const db = await getDb();
-      const col = db.collection("system_settings");
-
-      const updateData: Record<string, unknown> = {
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Only update API keys if a new unmasked string was provided
-      if (data.settings.qwenApiKey !== undefined && !isMasked(data.settings.qwenApiKey)) {
-        updateData["qwenApiKey"] = data.settings.qwenApiKey.trim();
-      }
-      if (data.settings.groqApiKey !== undefined && !isMasked(data.settings.groqApiKey)) {
-        updateData["groqApiKey"] = data.settings.groqApiKey.trim();
-      }
-      if (data.settings.cerebrasApiKey !== undefined && !isMasked(data.settings.cerebrasApiKey)) {
-        updateData["cerebrasApiKey"] = data.settings.cerebrasApiKey.trim();
-      }
-      if (data.settings.openrouterApiKey !== undefined && !isMasked(data.settings.openrouterApiKey)) {
-        updateData["openrouterApiKey"] = data.settings.openrouterApiKey.trim();
-      }
-      if (data.settings.nvidiaApiKey !== undefined && !isMasked(data.settings.nvidiaApiKey)) {
-        updateData["nvidiaApiKey"] = data.settings.nvidiaApiKey.trim();
-      }
-      if (data.settings.geminiApiKey !== undefined && !isMasked(data.settings.geminiApiKey)) {
-        updateData["geminiApiKey"] = data.settings.geminiApiKey.trim();
-      }
-      if (data.settings.defaultRole !== undefined) {
-        updateData["defaultRole"] = data.settings.defaultRole.trim();
-      }
-      if (data.settings.companyName !== undefined) {
-        updateData["companyName"] = data.settings.companyName.trim();
-      }
-      if (data.settings.defaultModelId !== undefined) {
-        updateData["defaultModelId"] = data.settings.defaultModelId.trim();
-      }
-
-      await col.updateOne({ key: "global_config" }, { $set: updateData }, { upsert: true });
-
-      return { success: true, message: "API keys & system settings successfully saved in MongoDB Atlas." };
-    } catch (err) {
-      console.error("[MongoDB] Failed to save admin settings:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
+    if (data.settings.geminiApiKey !== undefined && !isMasked(data.settings.geminiApiKey)) {
+      updateData["geminiApiKey"] = data.settings.geminiApiKey.trim();
     }
-  });
-
-/** Get Admin Settings (password required to view secrets) */
-export const getAdminSettingsFn = createServerFn({ method: "POST" })
-  .validator((data: { passcode: string }) => data)
-  .handler(async ({ data }) => {
-    if (!checkAdminPassword(data.passcode)) {
-      return { success: false, error: "Invalid admin passcode." };
+    if (data.settings.defaultRole !== undefined) {
+      updateData["defaultRole"] = data.settings.defaultRole.trim();
+    }
+    if (data.settings.companyName !== undefined) {
+      updateData["companyName"] = data.settings.companyName.trim();
+    }
+    if (data.settings.defaultModelId !== undefined) {
+      updateData["defaultModelId"] = data.settings.defaultModelId.trim();
     }
 
-    try {
-      const db = await getDb();
-      const col = db.collection("system_settings");
-      const config = await col.findOne({ key: "global_config" });
+    await col.updateOne({ key: "global_config" }, { $set: updateData }, { upsert: true });
 
-      const count = await db.collection("analyses").countDocuments().catch(() => 0);
-      const ping = await pingMongo();
+    return { success: true, message: "API keys & system settings successfully saved in MongoDB Atlas." };
+  } catch (err) {
+    console.error("[MongoDB] Failed to save admin settings:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
 
-      const qwenKey =
-        (config?.["qwenApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
-        "";
+/** Get Admin Settings directly from MongoDB */
+export async function getAdminSettings(data: { passcode: string }): Promise<{
+  success: boolean;
+  settings?: AdminSystemSettings;
+  stats?: {
+    totalAnalyses: number;
+    mongoPing: { ok: boolean; message: string; dbName: string; latencyMs?: number };
+  };
+  error?: string;
+}> {
+  if (!checkAdminPassword(data.passcode)) {
+    return { success: false, error: "Invalid admin passcode." };
+  }
 
-      const groqKey =
-        (config?.["groqApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
-        "";
+  try {
+    const db = await getDb();
+    const col = db.collection("system_settings");
+    const config = await col.findOne({ key: "global_config" });
 
-      const cerebrasKey =
-        (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
-        "";
+    const count = await db.collection("analyses").countDocuments().catch(() => 0);
+    const ping = await pingMongo();
 
-      const openrouterKey =
-        (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
-        "";
+    const qwenKey =
+      (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
+      "";
 
-      const nvidiaKey =
-        (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
-        "";
+    const groqKey =
+      (config?.["groqApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
+      "";
 
-      const geminiKey =
-        (config?.["geminiApiKey"] as string | undefined)?.trim() ||
-        (typeof process !== "undefined" &&
-          process.env &&
-          (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
-        "";
+    const cerebrasKey =
+      (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
+      "";
 
-      return {
-        success: true,
-        settings: {
-          qwenApiKey: maskSecret(qwenKey),
-          groqApiKey: maskSecret(groqKey),
-          cerebrasApiKey: maskSecret(cerebrasKey),
-          openrouterApiKey: maskSecret(openrouterKey),
-          nvidiaApiKey: maskSecret(nvidiaKey),
-          geminiApiKey: maskSecret(geminiKey),
-          defaultRole:
-            (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
-          companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
-          defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
-          updatedAt: (config?.["updatedAt"] as string | undefined) || "",
-        },
-        stats: {
-          totalAnalyses: count,
-          mongoPing: ping,
-        },
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[MongoDB] Failed to get admin settings:", msg);
-      return {
-        success: true,
-        settings: {
-          qwenApiKey: "",
-          groqApiKey: "",
-          cerebrasApiKey: "",
-          openrouterApiKey: "",
-          nvidiaApiKey: "",
-          geminiApiKey: "",
-          defaultRole: "Software Engineer (Entry Level)",
-          companyName: "the hiring company",
-          updatedAt: "",
-        },
-        stats: {
-          totalAnalyses: 0,
-          mongoPing: { ok: false, message: msg, dbName: "resume_radiance" },
-        },
-      };
-    }
-  });
+    const openrouterKey =
+      (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
+      "";
 
-/** Test an API Key against the provider */
-export const testApiKeyFn = createServerFn({ method: "POST" })
-  .validator(
-    (data: {
-      provider: "qwen" | "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
-      apiKey?: string;
-      passcode?: string;
-    }) => data,
-  )
-  .handler(async ({ data }) => {
-    let key = data.apiKey?.trim();
-    if (!key || key === "trigger-database-vault-test" || isMasked(key)) {
-      if (data.passcode && !checkAdminPassword(data.passcode)) {
-        return { success: false, message: "Unauthorized: Invalid admin passcode." };
-      }
-      try {
-        const db = await getDb();
-        const col = db.collection("system_settings");
-        const config = await col.findOne({ key: "global_config" });
-        if (data.provider === "qwen") {
-          key =
-            (config?.["qwenApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
-            "";
-        } else if (data.provider === "groq") {
-          key =
-            (config?.["groqApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
-            "";
-        } else if (data.provider === "cerebras") {
-          key =
-            (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
-            "";
-        } else if (data.provider === "openrouter") {
-          key =
-            (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
-            "";
-        } else if (data.provider === "gemini") {
-          key =
-            (config?.["geminiApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
-            "";
-        } else {
-          key =
-            (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
-            (typeof process !== "undefined" &&
-              process.env &&
-              (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
-            "";
-        }
-      } catch (e) {
-        return { success: false, message: `Could not connect to MongoDB: ${String(e)}` };
-      }
-    }
+    const nvidiaKey =
+      (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
+      "";
 
-    if (!key) {
-      return {
-        success: false,
-        message: `No API key configured in MongoDB Vault for ${data.provider.toUpperCase()}. Please add it in Admin Panel (/admin).`,
-      };
-    }
+    const geminiKey =
+      (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
+      "";
 
-    if (data.provider === "qwen") {
-      try {
-        // Try China main gateway first, then International
-        let res = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify({
-            model: "qwen-plus",
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 5,
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
+    return {
+      success: true,
+      settings: {
+        qwenApiKey: maskSecret(qwenKey),
+        groqApiKey: maskSecret(groqKey),
+        cerebrasApiKey: maskSecret(cerebrasKey),
+        openrouterApiKey: maskSecret(openrouterKey),
+        nvidiaApiKey: maskSecret(nvidiaKey),
+        geminiApiKey: maskSecret(geminiKey),
+        defaultRole:
+          (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
+        companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
+        defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
+        updatedAt: (config?.["updatedAt"] as string | undefined) || "",
+      },
+      stats: {
+        totalAnalyses: count,
+        mongoPing: ping,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[MongoDB] Failed to get admin settings:", msg);
+    return {
+      success: true,
+      settings: {
+        qwenApiKey: "",
+        groqApiKey: "",
+        cerebrasApiKey: "",
+        openrouterApiKey: "",
+        nvidiaApiKey: "",
+        geminiApiKey: "",
+        defaultRole: "Software Engineer (Entry Level)",
+        companyName: "the hiring company",
+        updatedAt: "",
+      },
+      stats: {
+        totalAnalyses: 0,
+        mongoPing: { ok: false, message: msg, dbName: "resume_radiance" },
+      },
+    };
+  }
+}
 
-        if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404)) {
-          res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${key}`,
-            },
-            body: JSON.stringify({
-              model: "qwen-plus",
-              messages: [{ role: "user", content: "ping" }],
-              max_tokens: 5,
-            }),
-            signal: AbortSignal.timeout(10000),
-          });
-        }
-
-        if (res.ok) return { success: true, message: "Qwen / Alibaba DashScope API key is valid and working!" };
-        const err = await res.text().catch(() => "");
-        if (err.includes("AccessDenied.Unpurchased") || res.status === 403) {
-          return {
-            success: false,
-            message:
-              "Qwen key is authenticated, but your Alibaba account has not claimed free trial tokens yet. Please visit https://home.qwencloud.com/benefits to activate your 2,000,000 free tokens.",
-          };
-        }
-        if (err.includes("Incorrect API key") || res.status === 401) {
-          return {
-            success: false,
-            message: "Invalid Qwen API key. Please generate a new key from https://home.qwencloud.com/benefits.",
-          };
-        }
-        return { success: false, message: `Qwen DashScope check failed (${res.status}): ${err.slice(0, 120)}` };
-      } catch (e) {
-        return { success: false, message: `Qwen connection failed: ${String(e)}` };
-      }
-    }
-
-    if (data.provider === "groq") {
-      try {
-        const res = await fetch("https://api.groq.com/openai/v1/models", {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            Accept: "application/json",
-          },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working (100% Free · 500+ tok/s)!" };
-        const err = await res.text().catch(() => "");
-        return { success: false, message: `Groq check failed (${res.status}): ${err.slice(0, 120)}` };
-      } catch (e) {
-        return { success: false, message: `Groq connection failed: ${String(e)}` };
-      }
-    }
-
-    if (data.provider === "cerebras") {
-      try {
-        const res = await fetch("https://api.cerebras.ai/v1/models", {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            Accept: "application/json",
-          },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (res.ok) {
-          return { success: true, message: "Cerebras Wafer-Scale API key is valid and working!" };
-        }
-        const err = await res.text().catch(() => "");
-        if (res.status === 402) {
-          return {
-            success: false,
-            message: "Cerebras key authenticated, but free trial credits are exhausted (HTTP 402).",
-          };
-        }
-        return { success: false, message: `Cerebras check failed (${res.status}): ${err.slice(0, 120)}` };
-      } catch (e) {
-        return { success: false, message: `Cerebras connection failed: ${String(e)}` };
-      }
-    }
-
-    if (data.provider === "openrouter") {
-      try {
-        const res = await fetch("https://openrouter.ai/api/v1/models", {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": "https://resumeradiance.com",
-            "X-Title": "Resume Radiance",
-          },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (res.ok) return { success: true, message: "OpenRouter API key is valid and working!" };
-        const err = await res.text().catch(() => "");
-        return { success: false, message: `OpenRouter check failed (${res.status}): ${err.slice(0, 120)}` };
-      } catch (e) {
-        return { success: false, message: `OpenRouter connection failed: ${String(e)}` };
-      }
-    }
-
-    if (data.provider === "gemini") {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": key,
-          },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: "ping" }] }],
-            generationConfig: { maxOutputTokens: 5 },
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-
-        if (res.ok) {
-          return { success: true, message: "Google Gemini API key is valid and working!" };
-        }
-        const errText = await res.text().catch(() => "");
-        return { success: false, message: `Gemini API check failed (${res.status}): ${errText.slice(0, 120)}` };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { success: false, message: `Gemini connection failed: ${msg}` };
-      }
-    }
-
-    // Default: NVIDIA NIM
-    try {
-      const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: "google/diffusiongemma-26b-a4b-it",
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 5,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-
-      if (res.ok) {
-        return { success: true, message: "NVIDIA NIM API key is valid and working (TensorRT Accelerated)!" };
-      }
-      const errText = await res.text().catch(() => "");
-      return { success: false, message: `NVIDIA API check failed (${res.status}): ${errText.slice(0, 120)}` };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { success: false, message: `NVIDIA connection failed: ${msg}` };
-    }
-  });
-
-/** Get Public System Info (Safe for all users without exposing API keys) */
-export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(async () => {
+/** Get Public System Info directly */
+export async function getPublicSystemInfo(): Promise<{
+  success: boolean;
+  hasServerQwenKey: boolean;
+  hasServerGroqKey: boolean;
+  hasServerCerebrasKey: boolean;
+  hasServerOpenRouterKey: boolean;
+  hasServerNvidiaKey: boolean;
+  hasServerGeminiKey: boolean;
+  defaultRole: string;
+  companyName: string;
+  defaultModelId: string;
+  databaseConnected: boolean;
+}> {
   try {
     const db = await getDb();
     const col = db.collection("system_settings");
@@ -711,4 +487,300 @@ export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(a
       databaseConnected: false,
     };
   }
-});
+}
+
+/** Test an API Key against provider */
+export async function testApiKey(data: {
+  provider: "qwen" | "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
+  apiKey?: string;
+  passcode?: string;
+}): Promise<{ success: boolean; message: string }> {
+  let key = data.apiKey?.trim();
+  if (!key || key === "trigger-database-vault-test" || isMasked(key)) {
+    if (data.passcode && !checkAdminPassword(data.passcode)) {
+      return { success: false, message: "Unauthorized: Invalid admin passcode." };
+    }
+    try {
+      const db = await getDb();
+      const col = db.collection("system_settings");
+      const config = await col.findOne({ key: "global_config" });
+      if (data.provider === "qwen") {
+        key =
+          (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
+          "";
+      } else if (data.provider === "groq") {
+        key =
+          (config?.["groqApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
+          "";
+      } else if (data.provider === "cerebras") {
+        key =
+          (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
+          "";
+      } else if (data.provider === "openrouter") {
+        key =
+          (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
+          "";
+      } else if (data.provider === "gemini") {
+        key =
+          (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
+          "";
+      } else {
+        key =
+          (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+          (typeof process !== "undefined" &&
+            process.env &&
+            (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
+          "";
+      }
+    } catch (e) {
+      return { success: false, message: `Could not connect to MongoDB: ${String(e)}` };
+    }
+  }
+
+  if (!key) {
+    return {
+      success: false,
+      message: `No API key configured in MongoDB Vault for ${data.provider.toUpperCase()}. Please add it in Admin Panel (/admin).`,
+    };
+  }
+
+  if (data.provider === "qwen") {
+    try {
+      let res = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: "qwen-plus",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404)) {
+        res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: "qwen-plus",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+      }
+
+      if (res.ok) return { success: true, message: "Qwen / Alibaba DashScope API key is valid and working!" };
+      const err = await res.text().catch(() => "");
+      if (err.includes("AccessDenied.Unpurchased") || res.status === 403) {
+        return {
+          success: false,
+          message:
+            "Qwen key is authenticated, but your Alibaba account has not claimed free trial tokens yet. Please visit https://home.qwencloud.com/benefits to activate your 2,000,000 free tokens.",
+        };
+      }
+      if (err.includes("Incorrect API key") || res.status === 401) {
+        return {
+          success: false,
+          message: "Invalid Qwen API key. Please generate a new key from https://home.qwencloud.com/benefits.",
+        };
+      }
+      return { success: false, message: `Qwen DashScope check failed (${res.status}): ${err.slice(0, 120)}` };
+    } catch (e) {
+      return { success: false, message: `Qwen connection failed: ${String(e)}` };
+    }
+  }
+
+  if (data.provider === "groq") {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) return { success: true, message: "Groq Cloud API key is valid and working (100% Free · 500+ tok/s)!" };
+      const err = await res.text().catch(() => "");
+      return { success: false, message: `Groq check failed (${res.status}): ${err.slice(0, 120)}` };
+    } catch (e) {
+      return { success: false, message: `Groq connection failed: ${String(e)}` };
+    }
+  }
+
+  if (data.provider === "cerebras") {
+    try {
+      const res = await fetch("https://api.cerebras.ai/v1/models", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        return { success: true, message: "Cerebras Wafer-Scale API key is valid and working!" };
+      }
+      const err = await res.text().catch(() => "");
+      if (res.status === 402) {
+        return {
+          success: false,
+          message: "Cerebras key authenticated, but free trial credits are exhausted (HTTP 402).",
+        };
+      }
+      return { success: false, message: `Cerebras check failed (${res.status}): ${err.slice(0, 120)}` };
+    } catch (e) {
+      return { success: false, message: `Cerebras connection failed: ${String(e)}` };
+    }
+  }
+
+  if (data.provider === "openrouter") {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "HTTP-Referer": "https://resumeradiance.com",
+          "X-Title": "Resume Radiance",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) return { success: true, message: "OpenRouter API key is valid and working!" };
+      const err = await res.text().catch(() => "");
+      return { success: false, message: `OpenRouter check failed (${res.status}): ${err.slice(0, 120)}` };
+    } catch (e) {
+      return { success: false, message: `OpenRouter connection failed: ${String(e)}` };
+    }
+  }
+
+  if (data.provider === "gemini") {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": key,
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "ping" }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.ok) {
+        return { success: true, message: "Google Gemini API key is valid and working!" };
+      }
+      const errText = await res.text().catch(() => "");
+      return { success: false, message: `Gemini API check failed (${res.status}): ${errText.slice(0, 120)}` };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, message: `Gemini connection failed: ${msg}` };
+    }
+  }
+
+  // Default: NVIDIA NIM
+  try {
+    const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: "google/diffusiongemma-26b-a4b-it",
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 5,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (res.ok) {
+      return { success: true, message: "NVIDIA NIM API key is valid and working (TensorRT Accelerated)!" };
+    }
+    const errText = await res.text().catch(() => "");
+    return { success: false, message: `NVIDIA API check failed (${res.status}): ${errText.slice(0, 120)}` };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, message: `NVIDIA connection failed: ${msg}` };
+  }
+}
+
+/* ------------------------------- TanStack Server Function RPC Wrappers ------------------------------- */
+
+export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
+  .validator(
+    (data: {
+      id: string;
+      fileName: string;
+      analysis: Analysis;
+      cleanText?: string | undefined;
+      rawText?: string | undefined;
+    }) => data,
+  )
+  .handler(async ({ data }) => saveAnalysisMongo(data));
+
+export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(async () =>
+  loadAnalysesMongo(),
+);
+
+export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { id: string; passcode?: string }) => data)
+  .handler(async ({ data }) => deleteAnalysisMongo(data));
+
+export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { ids: string[]; passcode?: string }) => data)
+  .handler(async ({ data }) => deleteManyAnalysesMongo(data));
+
+export const clearAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { adminPass?: string; passcode?: string }) => data)
+  .handler(async ({ data }) => clearAnalysesMongo(data));
+
+export const verifyAdminPassFn = createServerFn({ method: "POST" })
+  .validator((data: { passcode: string }) => data)
+  .handler(async ({ data }) => ({ valid: checkAdminPassword(data.passcode) }));
+
+export const saveAdminSettingsFn = createServerFn({ method: "POST" })
+  .validator((data: { passcode: string; settings: AdminSystemSettings }) => data)
+  .handler(async ({ data }) => saveAdminSettings(data));
+
+export const getAdminSettingsFn = createServerFn({ method: "POST" })
+  .validator((data: { passcode: string }) => data)
+  .handler(async ({ data }) => getAdminSettings(data));
+
+export const testApiKeyFn = createServerFn({ method: "POST" })
+  .validator(
+    (data: {
+      provider: "qwen" | "groq" | "cerebras" | "openrouter" | "nvidia" | "gemini";
+      apiKey?: string;
+      passcode?: string;
+    }) => data,
+  )
+  .handler(async ({ data }) => testApiKey(data));
+
+export const getPublicSystemInfoFn = createServerFn({ method: "GET" }).handler(async () =>
+  getPublicSystemInfo(),
+);

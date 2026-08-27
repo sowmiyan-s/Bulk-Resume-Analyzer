@@ -8,6 +8,9 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    optimizeDeps: {
+      exclude: ["mongodb"],
+    },
     resolve: {
       alias: {
         "punycode/": "punycode",

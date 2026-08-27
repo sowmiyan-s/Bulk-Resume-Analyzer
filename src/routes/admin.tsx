@@ -97,6 +97,7 @@ function AdminPage() {
     ok: boolean;
     message: string;
     dbName: string;
+    latencyMs?: number;
   } | null>(null);
   const [query, setQuery] = useState("");
 
@@ -517,21 +518,25 @@ function AdminPage() {
         <section className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex size-9 items-center justify-center rounded-xl bg-success/15 text-success">
+              <div className={`flex size-9 items-center justify-center rounded-xl ${mongoStatus?.ok ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
                 <Database className="size-5" />
               </div>
               <div>
                 <h2 className="text-sm font-bold">MongoDB Atlas Cloud Cluster</h2>
                 <p className="text-xs text-muted-foreground">
-                  Cluster: cluster0.er22sa5.mongodb.net · DB: resume_radiance
+                  DB: {mongoStatus?.dbName || "resume_radiance"} {mongoStatus?.latencyMs !== undefined ? `· Latency: ${mongoStatus.latencyMs}ms` : ""}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
-                <span className="size-1.5 rounded-full bg-success animate-pulse" />
-                {mongoStatus?.ok ? "Connected & Healthy" : "Connected"}
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                mongoStatus?.ok
+                  ? "border-success/30 bg-success/10 text-success"
+                  : "border-destructive/30 bg-destructive/10 text-destructive"
+              }`}>
+                <span className={`size-1.5 rounded-full ${mongoStatus?.ok ? "bg-success animate-pulse" : "bg-destructive"}`} />
+                {mongoStatus?.ok ? `Connected (${mongoStatus.latencyMs ?? 0}ms)` : (mongoStatus?.message || "Disconnected")}
               </span>
               <Badge variant="outline" className="font-mono text-xs">
                 {analyses.length} Saved Resumes

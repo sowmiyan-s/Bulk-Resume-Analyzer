@@ -1,26 +1,41 @@
 import * as React from "react";
-import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { Check } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 
-const Checkbox = React.forwardRef<
-  React.ElementRef<typeof CheckboxPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
->(({ className, ...props }, ref) => (
-  <CheckboxPrimitive.Root
-    ref={ref}
-    className={cn(
-      "grid place-content-center peer h-4 w-4 shrink-0 rounded-sm border border-primary shadow cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-      className,
-    )}
-    {...props}
-  >
-    <CheckboxPrimitive.Indicator className={cn("grid place-content-center text-current")}>
-      <Check className="h-4 w-4" />
-    </CheckboxPrimitive.Indicator>
-  </CheckboxPrimitive.Root>
-));
-Checkbox.displayName = CheckboxPrimitive.Root.displayName;
+export interface CheckboxProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "onChange" | "checked"> {
+  checked?: boolean | "indeterminate";
+  onCheckedChange?: (checked: boolean) => void;
+}
+
+const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
+  ({ className, checked, onCheckedChange, disabled, ...props }, ref) => {
+    const internalRef = React.useRef<HTMLInputElement | null>(null);
+
+    React.useImperativeHandle(ref, () => internalRef.current!);
+
+    React.useEffect(() => {
+      if (internalRef.current) {
+        internalRef.current.indeterminate = checked === "indeterminate";
+      }
+    }, [checked]);
+
+    return (
+      <input
+        type="checkbox"
+        ref={internalRef}
+        checked={checked === true}
+        disabled={disabled}
+        onChange={(e) => onCheckedChange?.(e.target.checked)}
+        className={cn(
+          "h-4 w-4 shrink-0 rounded border border-primary text-primary accent-primary cursor-pointer transition-colors focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
+Checkbox.displayName = "Checkbox";
 
 export { Checkbox };

@@ -57,13 +57,15 @@ export const DEFAULT_SETTINGS: LlmSettings = {
 };
 
 export class LlmError extends Error {
-  constructor(
-    message: string,
-    readonly status: number | null,
-    readonly retryable: boolean,
-  ) {
+  readonly status: number | null;
+  readonly retryable: boolean;
+
+  constructor(message: string, status: number | null, retryable: boolean) {
     super(message);
     this.name = "LlmError";
+    this.status = status;
+    this.retryable = retryable;
+    Object.setPrototypeOf(this, LlmError.prototype);
   }
 }
 

@@ -91,7 +91,7 @@ export function SettingsDialog({
           className="h-8 gap-1.5 rounded-xl border-border/80 bg-secondary/50 px-3 text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
         >
           <Settings2 className="size-3.5 text-primary" />
-          <span>AI Engine</span>
+          <span>Settings</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[580px] p-6 rounded-2xl">

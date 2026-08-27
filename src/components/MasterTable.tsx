@@ -503,36 +503,37 @@ export function MasterTable({
         </div>
       )}
 
-      <div className="panel overflow-hidden border border-border/80">
+      <div className="panel overflow-hidden border border-border/80 rounded-2xl shadow-xs">
         <div className="overflow-x-auto">
           <Table>
-            <TableHeader className="bg-secondary/20">
+            <TableHeader className="bg-secondary/30">
               <TableRow className="border-b border-border/80 hover:bg-transparent">
-                <TableHead className="w-10 text-center">
-                  <Checkbox
-                    checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
-                    onCheckedChange={toggleSelectAll}
-                    aria-label="Select all candidates"
-                    className="translate-y-0.5"
-                  />
+                <TableHead className="w-12 px-3 text-center">
+                  <div className="flex items-center justify-center">
+                    <Checkbox
+                      checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all candidates"
+                    />
+                  </div>
                 </TableHead>
-                <TableHead className="w-10 text-xs font-semibold text-muted-foreground">
+                <TableHead className="w-12 text-center text-xs font-semibold text-muted-foreground">
                   #
                 </TableHead>
-                <Th k="name">Candidate &amp; Role</Th>
-                <Th k="score" className="w-28">
+                <Th k="name" className="min-w-[180px]">Candidate &amp; Role</Th>
+                <Th k="score" className="w-28 text-center">
                   Score
                 </Th>
-                <Th k="tier" className="w-36">
+                <Th k="tier" className="w-40">
                   Readiness / Status
                 </Th>
-                <Th k="jd" className="w-24">
+                <Th k="jd" className="w-24 text-center">
                   JD Match
                 </Th>
-                <Th k="issues" className="w-28">
+                <Th k="issues" className="w-32">
                   Issues
                 </Th>
-                <TableHead className="w-36 text-right text-xs font-semibold text-muted-foreground">
+                <TableHead className="w-36 text-right text-xs font-semibold text-muted-foreground pr-4">
                   Actions
                 </TableHead>
               </TableRow>
@@ -560,31 +561,43 @@ export function MasterTable({
                   <TableRow
                     key={row.id}
                     className={`cursor-pointer transition-all ${
-                      isShortlisted
-                        ? "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 hover:bg-emerald-500/15"
-                        : isSelected
-                          ? "bg-primary/5 hover:bg-primary/10"
+                      isSelected
+                        ? "bg-primary/10 hover:bg-primary/15"
+                        : isShortlisted
+                          ? "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 hover:bg-emerald-500/15"
                           : "hover:bg-secondary/30"
                     }`}
                     onClick={() => onOpen(row.id)}
                   >
                     <TableCell
-                      className="w-10 text-center"
-                      onClick={(e) => toggleSelectRow(row.id, e)}
+                      className="w-12 px-3 text-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectRow(row.id);
+                      }}
                     >
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelectRow(row.id)}
-                        aria-label={`Select candidate ${a.candidateName}`}
-                        className="translate-y-0.5"
-                      />
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              if (checked) next.add(row.id);
+                              else next.delete(row.id);
+                              return next;
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`Select candidate ${a.candidateName}`}
+                        />
+                      </div>
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="w-12 text-center font-mono text-xs text-muted-foreground">
                       {index + 1}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="min-w-[180px]">
                       <div className="flex items-center gap-1.5">
-                        <p className="max-w-[17rem] truncate text-xs font-semibold text-foreground">
+                        <p className="max-w-[18rem] truncate text-xs font-semibold text-foreground">
                           {a.candidateName}
                         </p>
                         {isShortlisted && (
@@ -596,7 +609,7 @@ export function MasterTable({
                           </span>
                         )}
                       </div>
-                      <p className="max-w-[17rem] truncate text-xs text-muted-foreground mt-0.5">
+                      <p className="max-w-[18rem] truncate text-xs text-muted-foreground mt-0.5">
                         {a.role} <span className="opacity-60">· {row.fileName}</span>
                       </p>
                     </TableCell>

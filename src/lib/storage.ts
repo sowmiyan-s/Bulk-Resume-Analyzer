@@ -6,13 +6,24 @@
  */
 
 import type { Analysis } from "./analysis-types";
-import {
-  saveAnalysisMongoFn,
-  loadAnalysesMongoFn,
-  clearAnalysesMongoFn,
-  deleteAnalysisMongoFn,
-  deleteManyAnalysesMongoFn,
-} from "./database.server";
+
+// Lazily load the TanStack server functions so the MongoDB driver — which extends
+// Node's `events.EventEmitter` — is NEVER pulled into the client/browser bundle.
+// A STATIC `import { ... } from "./database.server"` here dragged `mongodb` into the
+// client graph, and because `events` is externalized to `undefined` in the browser,
+// the driver's `class X extends EventEmitter` threw:
+//   "Class extends value undefined is not a constructor or null"
+// Dynamic import keeps the server-only module out of the client optimizer's reach;
+// the server fns are still callable from the client (TanStack invokes them via RPC).
+async function loadDbFns() {
+  return import("./database.server");
+}
+
+let _dbFns: Awaited<ReturnType<typeof loadDbFns>> | null = null;
+async function dbFns() {
+  if (!_dbFns) _dbFns = await loadDbFns();
+  return _dbFns;
+}
 
 export type StoredAnalysis = {
   id: string;
@@ -25,6 +36,7 @@ export type StoredAnalysis = {
   assumed_role: string;
   jd_score: number | null;
   created_at: string;
+  updated_at?: string;
   clean_text?: string;
   raw_text?: string;
   analysis: Analysis;
@@ -61,7 +73,7 @@ function writeLocal(rows: StoredAnalysis[]) {
 
 /**
  * Persist one analysis.
- * Saves to MongoDB Atlas in background and keeps localStorage updated.
+ * Saves to MongoDB Atlas cloud database and keeps localStorage updated.
  */
 export async function saveAnalysis(input: {
   id: string;
@@ -73,14 +85,15 @@ export async function saveAnalysis(input: {
   const row: StoredAnalysis = {
     id: input.id,
     file_name: input.fileName,
-    candidate_name: input.analysis.candidateName,
-    role: input.analysis.role,
-    overall_score: input.analysis.overallScore,
-    readiness_tier: input.analysis.readinessTier,
-    evaluation_basis: input.analysis.evaluationBasis,
-    assumed_role: input.analysis.assumedRole,
-    jd_score: input.analysis.jdScore,
+    candidate_name: input.analysis.candidateName || "Unnamed candidate",
+    role: input.analysis.role || "—",
+    overall_score: input.analysis.overallScore || 0,
+    readiness_tier: input.analysis.readinessTier || "Tier 3: Overhaul Required",
+    evaluation_basis: input.analysis.evaluationBasis || "role-fit",
+    assumed_role: input.analysis.assumedRole || "",
+    jd_score: input.analysis.jdScore ?? null,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     clean_text: input.cleanText || "",
     raw_text: input.rawText || "",
     analysis: input.analysis,
@@ -93,7 +106,8 @@ export async function saveAnalysis(input: {
 
   // Persist to MongoDB Atlas cloud database via server function
   try {
-    void saveAnalysisMongoFn({
+    const { saveAnalysisMongoFn } = await dbFns();
+    const res = await saveAnalysisMongoFn({
       data: {
         id: input.id,
         fileName: input.fileName,
@@ -101,11 +115,12 @@ export async function saveAnalysis(input: {
         cleanText: input.cleanText,
         rawText: input.rawText,
       },
-    }).catch((err) => {
-      console.warn("[storage] MongoDB save failed:", err);
     });
-  } catch {
-    /* ignore */
+    if (!res.success) {
+      console.warn("[storage] MongoDB Atlas save reported issue:", res.error);
+    }
+  } catch (err) {
+    console.warn("[storage] MongoDB Atlas save network call failed:", err);
   }
 
   return row;
@@ -114,13 +129,49 @@ export async function saveAnalysis(input: {
 /** Load all stored analyses (MongoDB first, merged with local records). */
 export async function loadAnalyses(): Promise<StoredAnalysis[]> {
   try {
+    const { loadAnalysesMongoFn, saveAnalysisMongoFn } = await dbFns();
     const res = await loadAnalysesMongoFn();
-    if (res && res.success && Array.isArray(res.items) && res.items.length > 0) {
-      // Merge with any local records
-      const local = readLocal().filter((l) => !res.items.some((r) => r.id === l.id));
-      const combined = [...(res.items as StoredAnalysis[]), ...local];
-      writeLocal(combined);
-      return combined;
+    if (res && res.success && Array.isArray(res.items)) {
+      if (res.items.length > 0) {
+        // Merge with any local records
+        const local = readLocal().filter((l) => !res.items.some((r) => r.id === l.id));
+        const combined = [...(res.items as StoredAnalysis[]), ...local];
+        writeLocal(combined);
+
+        // In background, sync any local-only records up to MongoDB Atlas
+        if (local.length > 0) {
+          for (const item of local) {
+            void saveAnalysisMongoFn({
+              data: {
+                id: item.id,
+                fileName: item.file_name,
+                analysis: item.analysis,
+                cleanText: item.clean_text,
+                rawText: item.raw_text,
+              },
+            }).catch(() => {});
+          }
+        }
+
+        return combined;
+      } else {
+        // MongoDB collection is currently empty; sync local cache to MongoDB
+        const local = readLocal();
+        if (local.length > 0) {
+          for (const item of local) {
+            void saveAnalysisMongoFn({
+              data: {
+                id: item.id,
+                fileName: item.file_name,
+                analysis: item.analysis,
+                cleanText: item.clean_text,
+                rawText: item.raw_text,
+              },
+            }).catch(() => {});
+          }
+        }
+        return local;
+      }
     }
   } catch (e) {
     console.warn("[storage] MongoDB load failed, using local cache:", e);
@@ -136,11 +187,10 @@ export async function deleteStoredAnalysis(id: string): Promise<void> {
   writeLocal(next);
 
   try {
-    void deleteAnalysisMongoFn({ data: { id } }).catch((err) => {
-      console.warn("[storage] MongoDB delete failed:", err);
-    });
-  } catch {
-    /* ignore */
+    const { deleteAnalysisMongoFn } = await dbFns();
+    await deleteAnalysisMongoFn({ data: { id } });
+  } catch (err) {
+    console.warn("[storage] MongoDB delete failed:", err);
   }
 }
 
@@ -153,20 +203,20 @@ export async function deleteStoredAnalyses(ids: string[]): Promise<void> {
   writeLocal(next);
 
   try {
-    void deleteManyAnalysesMongoFn({ data: { ids } }).catch((err) => {
-      console.warn("[storage] MongoDB deleteMany failed:", err);
-    });
-  } catch {
-    /* ignore */
+    const { deleteManyAnalysesMongoFn } = await dbFns();
+    await deleteManyAnalysesMongoFn({ data: { ids } });
+  } catch (err) {
+    console.warn("[storage] MongoDB deleteMany failed:", err);
   }
 }
 
 /** Clear all stored analyses from MongoDB and localStorage. */
 export async function clearAnalyses(): Promise<void> {
-  try {
-    void clearAnalysesMongoFn({ data: {} }).catch(() => {});
-  } catch {
-    /* ignore */
-  }
   writeLocal([]);
+  try {
+    const { clearAnalysesMongoFn } = await dbFns();
+    await clearAnalysesMongoFn({ data: {} });
+  } catch (err) {
+    console.warn("[storage] MongoDB clear failed:", err);
+  }
 }

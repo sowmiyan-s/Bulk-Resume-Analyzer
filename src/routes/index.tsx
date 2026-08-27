@@ -5,7 +5,6 @@ import {
   FileSpreadsheet,
   LayoutGrid,
   Loader2,
-  Lock,
   Play,
   RefreshCw,
   RotateCcw,
@@ -999,14 +998,6 @@ function Index() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              to="/admin"
-              className="hidden items-center gap-1.5 rounded-xl border border-border/80 bg-secondary/40 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground sm:flex transition-colors group"
-              title="Active AI model is configured in Admin Portal (Admin Only)"
-            >
-              <Lock className="size-3 text-primary group-hover:text-primary transition-colors" />
-              <span className="font-medium text-foreground">{activeModel.label}</span>
-            </Link>
             <Link
               to="/admin"
               className="inline-flex items-center gap-1.5 rounded-xl border border-border/80 bg-secondary/30 px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
