@@ -12,6 +12,7 @@ import {
   Shield,
   Sparkles,
   Square,
+  Target,
   Trash2,
   Trophy,
   Upload,
@@ -468,6 +469,22 @@ function Index() {
         }
         normalized.ats = atsReport;
         return normalized;
+      } catch (err: unknown) {
+        if (signal?.aborted) throw err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isFormatOrJson =
+          msg.includes("JSON") || msg.includes("parse") || msg.includes("empty") || attempt >= 2;
+        if (isFormatOrJson) {
+          console.warn(`[analyzeOne] Model response format issue for ${item.file.name}: ${msg}. Auto-recovering with Deterministic ATS Engine.`);
+          return createRuleBasedAnalysis(
+            atsReport,
+            item.file.name,
+            clean,
+            activeJd,
+            settings.defaultRole,
+          );
+        }
+        throw err;
       } finally {
         clearInterval(timer);
       }

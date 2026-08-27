@@ -472,7 +472,7 @@ export const MODELS: ModelOption[] = [
   },
 ];
 
-export const DEFAULT_MODEL_ID = "google/gemini-3.7-flash";
+export const DEFAULT_MODEL_ID = "google/gemini-3.1-flash-lite";
 
 export const FALLBACK_PROVIDER_ORDER: ProviderId[] = [
   "lovable",

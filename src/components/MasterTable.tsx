@@ -73,15 +73,15 @@ export function MasterTable({
   rows: MasterRow[];
   onOpen: (id: string) => void;
   onExportPdf: (id: string) => void;
-  onExportCsvSelected?: (rows: MasterRow[]) => void;
-  onExportMdSelected?: (rows: MasterRow[]) => void;
+  onExportCsvSelected?: ((rows: MasterRow[]) => void) | undefined;
+  onExportMdSelected?: ((rows: MasterRow[]) => void) | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDeleteMany?: ((ids: string[]) => void) | undefined;
   onReevaluate?: ((id: string) => void) | undefined;
   onReevaluateMany?: ((ids: string[]) => void) | undefined;
   hasActiveJd?: boolean | undefined;
-  shortlistCutoff?: number;
-  onShortlistCutoffChange?: (val: number) => void;
+  shortlistCutoff?: number | undefined;
+  onShortlistCutoffChange?: ((val: number) => void) | undefined;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);

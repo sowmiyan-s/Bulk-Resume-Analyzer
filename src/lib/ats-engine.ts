@@ -138,7 +138,7 @@ function jdKeywords(jd: string): string[] {
   const tokens = lc(jd)
     .replace(/[^a-z0-9+#./\s-]/g, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 4 && !STOP_WORDS.has(t) && !/^\d+$/.test(t));
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t) && !/^\d+$/.test(t));
   const freq = new Map<string, number>();
   for (const t of tokens) freq.set(t, (freq.get(t) ?? 0) + 1);
   const top = Array.from(freq.entries())
@@ -315,7 +315,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   let kws: string[] = [];
   let matched: string[] = [];
   let missing: string[] = [];
-  if (jobDescription && jobDescription.trim().length > 40) {
+  if (jobDescription && jobDescription.trim().length >= 5) {
     kws = jdKeywords(jobDescription);
     matched = kws.filter((k) => containsAny(text, [k]).length > 0);
     missing = kws.filter((k) => !matched.includes(k));

@@ -19,7 +19,7 @@
  *   - When a JD IS given we act as that company's hiring manager: blunt about fit.
  */
 
-import { NVIDIA_BASE, GEMINI_BASE, findModel, type ModelOption } from "./models";
+import { NVIDIA_BASE, GEMINI_BASE, findModel, DEFAULT_MODEL_ID, type ModelOption } from "./models";
 import { capForPrompt } from "./sanitize";
 import { executeLlmProxy } from "./llm-proxy.server";
 
@@ -44,12 +44,12 @@ export type LlmSettings = {
 };
 
 export const DEFAULT_SETTINGS: LlmSettings = {
-  modelId: "google/diffusiongemma-26b-a4b-it",
+  modelId: DEFAULT_MODEL_ID,
   apiKey: "",
   proxyUrl: "",
   customBaseUrl: "",
   temperature: 0.2,
-  maxTokens: 2000,
+  maxTokens: 3500,
   defaultRole: "Software Engineer (Entry Level)",
   companyName: "the hiring company",
   supabaseUrl: "",
@@ -66,8 +66,6 @@ export class LlmError extends Error {
     this.name = "LlmError";
   }
 }
-
-/* ------------------------------- prompting ------------------------------- */
 
 /* ------------------------------- prompting ------------------------------- */
 
@@ -143,40 +141,23 @@ export function buildMessages(input: {
   companyName?: string;
   atsFacts?: string;
 }): Array<{ role: "system" | "user"; content: string }> {
-  const jd = input.jobDescription?.trim();
-  const defaultRole = input.defaultRole?.trim() || "Software Engineer (Entry Level)";
+  const roleName = input.defaultRole?.trim() || "Software Engineer (Entry Level)";
+  const hasJd = Boolean(input.jobDescription && input.jobDescription.trim().length >= 5);
   const company = input.companyName?.trim() || "the hiring company";
-
-  const jdBlock = jd
-    ? `TARGET JOB DESCRIPTION (Hiring Company: ${company}):
-${capForPrompt(jd, 2200)}
-
-EVALUATION MANDATE:
-- Benchmark the candidate's skills, project architecture, and experience against the requirements of this Job Description.
-- Calibrate score fairly across the 4 categories (Stack Depth, Project Architecture, Experience, ATS Structure).
-- Maintain strict gender equality and evaluate purely on technical merit. Set evaluation_basis to "jd-fit".`
-    : `TARGET ROLE TO EVALUATE AGAINST:
-Role: ${defaultRole} (Target: ${company})
-
-EVALUATION MANDATE:
-- Benchmark the candidate's technical skills, project complexity, and engineering depth against this target role (${defaultRole}).
-- Calibrate score fairly across the 4 categories (Stack Depth, Project Architecture, Experience, ATS Structure). Set evaluation_basis to "role-fit".`;
-
-  const atsBlock = input.atsFacts ? `\n${input.atsFacts.trim()}\n` : "";
+  const atsBlock = input.atsFacts ? `\n\n${input.atsFacts}\n` : "";
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `Audit this resume (file: ${input.fileName}).
-${jdBlock}
-
-RESUME CONTENT & METRICS:
-${capForPrompt(input.resumeText)}
-${atsBlock}
-${SCHEMA_SPEC}
-
-${RULES}`,
+      content:
+        `FILE NAME: ${input.fileName}\n\n` +
+        `EVALUATION MODE: ${hasJd ? `Specific Job Description at ${company}` : `General Role: ${roleName}`}\n\n` +
+        (hasJd ? `JOB DESCRIPTION:\n${input.jobDescription?.trim()}\n\n` : "") +
+        `RESUME TEXT (cleaned and sanitized):\n${capForPrompt(input.resumeText)}\n` +
+        atsBlock +
+        `\nSCHEMA SPECIFICATION:\n${SCHEMA_SPEC}\n\n` +
+        RULES,
     },
   ];
 }
@@ -197,7 +178,21 @@ export function extractJson(raw: string): unknown {
   if (fence?.[1]) text = fence[1].trim();
 
   const start = text.indexOf("{");
-  if (start === -1) throw new LlmError("Model did not return JSON.", null, true);
+  if (start === -1) {
+    // If no curly brace found, attempt key-value pattern reconstruction
+    const nameMatch = text.match(/candidate_name["':\s]+([^"\n\r,]+)/i);
+    const scoreMatch = text.match(/overall_score["':\s]+(\d+)/i);
+    if (scoreMatch) {
+      return {
+        candidate_name: nameMatch?.[1]?.trim() || "Unnamed candidate",
+        overall_score: Number(scoreMatch[1]),
+        readiness_tier: Number(scoreMatch[1]) >= 80 ? "Tier 1: Shortlist Ready" : Number(scoreMatch[1]) >= 60 ? "Tier 2: Needs Minor Polish" : "Tier 3: Overhaul Required",
+        strengths: ["Evaluated from response text"],
+        critical_issues: [],
+      };
+    }
+    throw new LlmError("Model did not return JSON.", null, true);
+  }
 
   // Brace-match so trailing prose after the object doesn't break the parse.
   let depth = 0;
@@ -268,6 +263,15 @@ export function extractJson(raw: string): unknown {
       try {
         return JSON.parse(stripped + "]".repeat(Math.max(0, obk)) + "}".repeat(Math.max(0, ob)));
       } catch {
+        // Fallback: extract score using regex if structural repair fails
+        const scoreMatch = text.match(/overall_score["':\s]+(\d+)/i);
+        if (scoreMatch) {
+          return {
+            overall_score: Number(scoreMatch[1]),
+            readiness_tier: Number(scoreMatch[1]) >= 80 ? "Tier 1: Shortlist Ready" : Number(scoreMatch[1]) >= 60 ? "Tier 2: Needs Minor Polish" : "Tier 3: Overhaul Required",
+            strengths: ["Recovered candidate metrics"],
+          };
+        }
         throw new LlmError(
           "Could not parse the model's JSON (likely truncated — raise Max tokens).",
           null,
