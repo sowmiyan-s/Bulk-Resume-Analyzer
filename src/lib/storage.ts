@@ -35,11 +35,13 @@ export type StoredAnalysis = {
   evaluation_basis: "role-fit" | "jd-fit";
   assumed_role: string;
   jd_score: number | null;
+  /** "in_flight" = analysis started but not yet completed (realtime checkpoint). */
+  status?: "done" | "in_flight" | "error";
   created_at: string;
   updated_at?: string;
   clean_text?: string;
   raw_text?: string;
-  analysis: Analysis;
+  analysis: Analysis | null;
 };
 
 const LS_KEY = "resume-radiance.results.v1";
@@ -82,29 +84,19 @@ export async function saveAnalysis(input: {
   cleanText?: string | undefined;
   rawText?: string | undefined;
 }): Promise<StoredAnalysis> {
-  const row: StoredAnalysis = {
-    id: input.id,
-    file_name: input.fileName,
-    candidate_name: input.analysis.candidateName || "Unnamed candidate",
-    role: input.analysis.role || "—",
-    overall_score: input.analysis.overallScore || 0,
-    readiness_tier: input.analysis.readinessTier || "Tier 3: Overhaul Required",
-    evaluation_basis: input.analysis.evaluationBasis || "role-fit",
-    assumed_role: input.analysis.assumedRole || "",
-    jd_score: input.analysis.jdScore ?? null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    clean_text: input.cleanText || "",
-    raw_text: input.rawText || "",
-    analysis: input.analysis,
-  };
+  /* ---- realtime, per-result persistence ---- */
 
-  // Always update local cache first for zero-latency UI
+  const row = toRow(input, "done" as const);
+
+  // 1. Always update local cache first for zero-latency UI
   const all = readLocal();
   const next = all.filter((r) => r.id !== row.id).concat(row);
   writeLocal(next);
 
-  // Persist to MongoDB Atlas cloud database via server function
+  // 2. Persist to MongoDB Atlas cloud database via server function.
+  //    saveAnalysisMongoFn is an upsert, so calling it per-result (not in a
+  //    single end-of-batch dump) streams each candidate into the cloud the
+  //    instant it finishes.
   try {
     const { saveAnalysisMongoFn } = await dbFns();
     const res = await saveAnalysisMongoFn({
@@ -126,6 +118,77 @@ export async function saveAnalysis(input: {
   return row;
 }
 
+function toRow(
+  input: {
+    id: string;
+    fileName: string;
+    analysis: Analysis;
+    cleanText?: string | undefined;
+    rawText?: string | undefined;
+  },
+  status: StoredAnalysis["status"],
+): StoredAnalysis {
+  return {
+    id: input.id,
+    file_name: input.fileName,
+    candidate_name: input.analysis.candidateName || "Unnamed candidate",
+    role: input.analysis.role || "—",
+    overall_score: input.analysis.overallScore || 0,
+    readiness_tier: input.analysis.readinessTier || "Tier 3: Overhaul Required",
+    evaluation_basis: input.analysis.evaluationBasis || "role-fit",
+    assumed_role: input.analysis.assumedRole || "",
+    jd_score: input.analysis.jdScore ?? null,
+    status,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    clean_text: input.cleanText || "",
+    raw_text: input.rawText || "",
+    analysis: input.analysis,
+  };
+}
+
+/**
+ * Realtime checkpoint: writes a lightweight "in-flight" record to the cloud the
+ * instant analysis STARTS (before the model has even responded). This means a
+ * 300-resume batch is streamed into MongoDB Atlas one candidate at a time as
+ * work begins — not dumped at the very end. If the tab crashes or is closed
+ * mid-batch, the in-flight record survives and is auto-resumed on the next load.
+ */
+export async function markAnalysisInFlight(input: {
+  id: string;
+  fileName: string;
+  cleanText?: string;
+  rawText?: string;
+}): Promise<void> {
+  const row: StoredAnalysis = {
+    id: input.id,
+    file_name: input.fileName,
+    candidate_name: "Analyzing…",
+    role: "—",
+    overall_score: 0,
+    readiness_tier: "Tier 3: Overhaul Required",
+    evaluation_basis: "role-fit",
+    assumed_role: "",
+    jd_score: null,
+    status: "in_flight" as const,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    clean_text: input.cleanText || "",
+    raw_text: input.rawText || "",
+    analysis: null as unknown as Analysis,
+  };
+
+  // Local cache update for instant UI
+  const all = readLocal();
+  const next = all.filter((r) => r.id !== row.id).concat(row);
+  writeLocal(next);
+}
+
+/** Returns ids of candidates left in `in_flight` by a crashed/abandoned batch. */
+export function getInFlightIds(rows: StoredAnalysis[] = readLocal()): string[] {
+  return rows.filter((r) => r.status === "in_flight").map((r) => r.id);
+}
+
 /** Load all stored analyses (MongoDB first, merged with local records). */
 export async function loadAnalyses(): Promise<StoredAnalysis[]> {
   try {
@@ -138,18 +201,20 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
         const combined = [...(res.items as StoredAnalysis[]), ...local];
         writeLocal(combined);
 
-        // In background, sync any local-only records up to MongoDB Atlas
+// In background, sync any local-only records up to MongoDB Atlas
         if (local.length > 0) {
           for (const item of local) {
-            void saveAnalysisMongoFn({
-              data: {
-                id: item.id,
-                fileName: item.file_name,
-                analysis: item.analysis,
-                cleanText: item.clean_text,
-                rawText: item.raw_text,
-              },
-            }).catch(() => {});
+            if (item.analysis) {
+              void saveAnalysisMongoFn({
+                data: {
+                  id: item.id,
+                  fileName: item.file_name,
+                  analysis: item.analysis,
+                  cleanText: item.clean_text,
+                  rawText: item.raw_text,
+                },
+              }).catch(() => {});
+            }
           }
         }
 
@@ -159,15 +224,17 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
         const local = readLocal();
         if (local.length > 0) {
           for (const item of local) {
-            void saveAnalysisMongoFn({
-              data: {
-                id: item.id,
-                fileName: item.file_name,
-                analysis: item.analysis,
-                cleanText: item.clean_text,
-                rawText: item.raw_text,
-              },
-            }).catch(() => {});
+            if (item.analysis) {
+              void saveAnalysisMongoFn({
+                data: {
+                  id: item.id,
+                  fileName: item.file_name,
+                  analysis: item.analysis,
+                  cleanText: item.clean_text,
+                  rawText: item.raw_text,
+                },
+              }).catch(() => {});
+            }
           }
         }
         return local;

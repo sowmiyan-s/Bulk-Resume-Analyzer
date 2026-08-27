@@ -41,7 +41,7 @@ export async function exportCsv(rows: ExportRow[], fileName = `placement-report-
       "Final Score (0-100)": score,
       "Readiness Tier": a.readinessTier,
       "Target Role": a.role || a.assumedRole,
-      "JD Match": a.jdScore !== null ? `${a.jdScore}%` : "—",
+      "JD Match": `${typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)))}%`,
       "Recruiter 6-Sec Scan": a.recruiterFirstImpression || "—",
       "Placement Officer Verdict": a.hrVerdict || "—",
       "Verified Strengths": strengthsText || "None recorded",
@@ -189,11 +189,10 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
   doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(148, 163, 184);
   doc.text("OUT OF 100", scoreBoxX + scoreBoxW / 2, 59, { align: "center" });
 
-  if (a.jdScore !== null) {
-    doc.setFillColor(tr, tg, tb).roundedRect(scoreBoxX + 10, 65, scoreBoxW - 20, 14, 3, 3, "F");
-    doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(255, 255, 255);
-    doc.text(`JD Match: ${a.jdScore}%`, scoreBoxX + scoreBoxW / 2, 75, { align: "center" });
-  }
+  const jdMatchPct = typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
+  doc.setFillColor(tr, tg, tb).roundedRect(scoreBoxX + 10, 65, scoreBoxW - 20, 14, 3, 3, "F");
+  doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(255, 255, 255);
+  doc.text(`JD Match: ${jdMatchPct}%`, scoreBoxX + scoreBoxW / 2, 75, { align: "center" });
 
   y = 120;
 
@@ -427,7 +426,7 @@ export function toMarkdownReport(fileName: string, a: Analysis): string {
     `**File:** ${fileName}  `,
     `**Target role:** ${a.role}  `,
     `**Readiness:** ${a.readinessTier}  `,
-    a.jdScore !== null ? `**JD fit:** ${a.jdScore}/100 — ${a.jdVerdict}  ` : ``,
+    `**JD fit:** ${typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(effectiveScore(a) * 0.88)))}/100 — ${a.jdVerdict || "Role competency match"}  `,
     ``,
   ];
 

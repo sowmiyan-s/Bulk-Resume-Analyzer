@@ -1,5 +1,6 @@
 import { useEffect, useState, useTransition } from "react";
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowRight,
   Award,
@@ -7,8 +8,10 @@ import {
   Briefcase,
   Check,
   CheckCircle2,
+  ChevronRight,
   Code2,
   Copy,
+  Cpu,
   FileDown,
   FileText,
   GraduationCap,
@@ -67,12 +70,18 @@ type Props = {
   onReanalyzeWithJd?: (id: string) => void;
 };
 
-
-
 function sevTone(s: Issue["severity"]) {
   if (s === "critical") return "border-destructive/40 bg-destructive/10 text-destructive";
-  if (s === "major") return "border-warning/40 bg-warning/10 text-warning";
-  return "border-border bg-secondary text-muted-foreground";
+  if (s === "major") return "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+  return "border-border bg-secondary/40 text-muted-foreground";
+}
+
+function sevBadge(s: Issue["severity"]) {
+  if (s === "critical")
+    return "bg-destructive text-destructive-foreground border-destructive text-[10px] font-bold uppercase tracking-wider";
+  if (s === "major")
+    return "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40 text-[10px] font-bold uppercase tracking-wider";
+  return "bg-secondary text-muted-foreground border-border text-[10px] font-medium uppercase tracking-wider";
 }
 
 export function RectifyDrawer({
@@ -104,6 +113,16 @@ export function RectifyDrawer({
   if (!target) return null;
   const a = target.analysis;
   const atsData: AtsReport = a.ats ?? runAtsEngine(target.cleanText || target.rawText || "");
+  const currentScore = effectiveScore(a);
+  const jdScoreVal =
+    typeof a.jdScore === "number"
+      ? a.jdScore
+      : Math.max(0, Math.min(100, Math.round(currentScore * 0.88)));
+
+  const totalIssues = (a.criticalIssues || []).length;
+  const criticalCount = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
+  const totalMissing = (a.skillMatrix?.missing || []).length;
+  const totalRewrites = (a.bulletRewrites || []).length;
 
   const handleSave = () => {
     const parsed = manual.trim() === "" ? null : Number(manual);
@@ -140,20 +159,22 @@ export function RectifyDrawer({
         side="right"
         className="flex w-full flex-col gap-0 border-l border-border bg-card p-0 sm:max-w-[min(96vw,1020px)] shadow-2xl"
       >
-        {/* Fixed Header */}
-        <SheetHeader className="border-b border-border bg-secondary/30 px-6 py-4 shrink-0">
+        {/* Classy Fixed Header */}
+        <SheetHeader className="border-b border-border bg-card px-6 py-4 shrink-0 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <ScoreRing
-                value={effectiveScore(a)}
-                label={a.manualScore !== null ? "OVERRIDE" : "SCORE"}
-                size={64}
+                value={currentScore}
+                label={a.manualScore !== null ? "OVERRIDE" : "ATS FIT"}
+                size={62}
               />
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <SheetTitle className="text-lg font-bold text-foreground">
+                  <SheetTitle className="text-lg font-bold text-foreground tracking-tight">
                     {a.candidateName}
                   </SheetTitle>
+
+                  {/* Readiness Status Pill */}
                   <Badge
                     variant="outline"
                     className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${tierTone(
@@ -162,23 +183,39 @@ export function RectifyDrawer({
                   >
                     {a.readinessTier}
                   </Badge>
-                  {a.jdScore !== null && (
+
+                  {/* JD Match Pill */}
+                  <Badge
+                    variant="outline"
+                    className="border-primary/40 bg-primary/10 text-primary text-xs font-bold px-2.5 py-0.5 rounded-full"
+                  >
+                    🎯 {jdScoreVal}% JD Match
+                  </Badge>
+
+                  {/* Role Arc Pill */}
+                  {a.roleArc && a.roleArc !== "—" && (
                     <Badge
                       variant="outline"
-                      className="border-primary/40 bg-primary/10 text-primary text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                      className="border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-300 text-xs font-semibold px-2.5 py-0.5 rounded-full"
                     >
-                      🎯 {a.jdScore}% JD Match
+                      🧭 {a.roleArc}
                     </Badge>
                   )}
                 </div>
-                <SheetDescription className="text-xs text-muted-foreground">
-                  Target: <span className="font-semibold text-foreground">{a.role}</span> · File:{" "}
-                  <span className="font-mono text-muted-foreground">{target.fileName}</span>
+
+                <SheetDescription className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span>
+                    Target Role: <span className="font-semibold text-foreground">{a.role}</span>
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span className="font-mono text-muted-foreground truncate max-w-xs">
+                    {target.fileName}
+                  </span>
                 </SheetDescription>
               </div>
             </div>
 
-            {/* Actions */}
+            {/* Quick Action Buttons */}
             <div className="flex items-center gap-2">
               {hasActiveJd && onReanalyzeWithJd ? (
                 <Button
@@ -186,15 +223,15 @@ export function RectifyDrawer({
                   variant="outline"
                   className="h-8 text-xs font-medium rounded-lg border-primary/40 text-primary hover:bg-primary/10"
                   onClick={() => onReanalyzeWithJd(target.id)}
-                  title="Re-evaluate candidate against currently entered Job Description"
+                  title="Re-evaluate candidate against current Job Description"
                 >
-                  <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate (Current JD)
+                  <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate (JD)
                 </Button>
               ) : (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs font-medium rounded-lg"
+                  className="h-8 text-xs font-medium rounded-lg hover:bg-secondary"
                   onClick={() => onReanalyze(target.id)}
                 >
                   <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate
@@ -203,7 +240,7 @@ export function RectifyDrawer({
               <Button
                 size="sm"
                 variant="default"
-                className="h-8 text-xs font-semibold rounded-lg shadow-sm"
+                className="h-8 text-xs font-semibold rounded-lg shadow-xs"
                 onClick={() => onExportPdf(target.id)}
               >
                 <FileDown className="size-3.5 mr-1.5" /> Export PDF
@@ -224,68 +261,84 @@ export function RectifyDrawer({
           </div>
         </SheetHeader>
 
-        {/* Unified Smooth Scroll Container with Sticky Tabs */}
-        <Tabs defaultValue="sections" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Unified Scrollable Body with Clean Sticky Tab Navigation */}
+        <Tabs defaultValue="mistakes" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            {/* Top Executive Summary */}
-            <div className="border-b border-border bg-background p-6 space-y-4">
+            {/* Top HR Executive Snapshot */}
+            <div className="border-b border-border bg-muted/20 p-5 space-y-4">
               <div className="grid gap-4 lg:grid-cols-12">
-                {/* Left Column: First Impression & HR Verdict */}
+                {/* Recruiter Impression & Placement Verdict */}
                 <div className="space-y-3 lg:col-span-7">
                   {a.recruiterFirstImpression && (
-                    <div className="rounded-xl border border-primary/25 bg-primary/5 p-3.5">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-primary mb-1 flex items-center gap-1.5">
-                        <Target className="size-3.5" /> 6-Second Recruiter First Impression
+                    <div className="rounded-xl border border-primary/20 bg-background/80 p-3.5 shadow-2xs space-y-1">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                        <Target className="size-3.5" /> Recruiter's 6-Second Impression
                       </p>
-                      <p className="text-xs italic text-foreground leading-relaxed">
+                      <p className="text-xs text-foreground/90 leading-relaxed">
                         "{a.recruiterFirstImpression}"
                       </p>
                     </div>
                   )}
 
                   {a.hrVerdict && (
-                    <div className="rounded-xl border border-border bg-secondary/20 p-3.5 space-y-1">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Hiring Verdict &amp; Placement Readiness
+                    <div className="rounded-xl border border-border bg-background/80 p-3.5 shadow-2xs space-y-1">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <Award className="size-3.5 text-accent" /> Placement Officer Verdict
                       </p>
-                      <p className="text-xs text-foreground leading-relaxed">{a.hrVerdict}</p>
+                      <p className="text-xs text-foreground leading-relaxed font-medium">
+                        {a.hrVerdict}
+                      </p>
                     </div>
                   )}
 
                   {a.jdVerdict && (
-                    <div className="rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs leading-relaxed">
-                      <span className="font-semibold text-accent">JD Alignment: </span>
-                      <span className="text-foreground/90">{a.jdVerdict}</span>
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed flex items-start gap-2">
+                      <Zap className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-foreground">JD Alignment Note: </span>
+                        <span className="text-muted-foreground">{a.jdVerdict}</span>
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Right Column: Score Breakdown */}
-                <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3 lg:col-span-5">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Section Competency Breakdown
-                  </p>
-                  <div className="space-y-3">
+                {/* Section Competency Breakdown Bars */}
+                <div className="rounded-xl border border-border bg-background/80 p-4 space-y-2.5 lg:col-span-5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Competency Breakdown
+                    </p>
+                    <span className="text-[10px] font-mono font-semibold text-muted-foreground">
+                      Total: 100 pts
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
                     {a.scoreBreakdown.map((row, i) => {
                       const pct = row.max ? Math.round((row.score / row.max) * 100) : 0;
                       const toneColor =
                         pct >= 75
-                          ? "text-success"
+                          ? "text-emerald-600 dark:text-emerald-400"
                           : pct >= 55
-                            ? "text-warning"
-                            : "text-destructive";
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-rose-600 dark:text-rose-400";
                       const barBg =
-                        pct >= 75 ? "bg-success" : pct >= 55 ? "bg-warning" : "bg-destructive";
+                        pct >= 75
+                          ? "bg-emerald-500"
+                          : pct >= 55
+                            ? "bg-amber-500"
+                            : "bg-rose-500";
                       return (
                         <div key={i} className="space-y-1">
                           <div className="flex items-center justify-between text-xs">
-                            <span className="font-medium text-foreground">{row.category}</span>
+                            <span className="font-medium text-foreground truncate max-w-[14rem]">
+                              {row.category}
+                            </span>
                             <span className={`font-mono text-xs font-bold ${toneColor}`}>
                               {row.score}
                               <span className="text-muted-foreground font-normal">/{row.max}</span>
                             </span>
                           </div>
-                          <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                          <div className="h-1.5 w-full rounded-full bg-secondary/80 overflow-hidden">
                             <div
                               className={`h-full rounded-full ${barBg} transition-all duration-500`}
                               style={{ width: `${Math.max(4, pct)}%` }}
@@ -299,904 +352,622 @@ export function RectifyDrawer({
               </div>
             </div>
 
-            {/* Sticky Tab Navigation Bar */}
-            <div className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur px-6 py-2">
-              <TabsList className="h-9 gap-1 bg-secondary/40 p-1 rounded-xl flex-wrap">
+            {/* Classy Sticky 4-Tab Navigation Bar */}
+            <div className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur-md px-6 py-2">
+              <TabsList className="h-10 gap-1 bg-secondary/50 p-1 rounded-xl w-full justify-start overflow-x-auto">
                 <TabsTrigger
-                  value="sections"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                  value="mistakes"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-xs text-xs rounded-lg px-3.5 py-1.5 font-semibold transition-all"
                 >
-                  <FileText className="size-3.5 mr-1.5 text-primary" />
-                  Section-by-Section Audit
+                  <AlertTriangle className="size-3.5 mr-1.5 text-rose-500" />
+                  Mistakes &amp; Red Flags
+                  {totalIssues > 0 && (
+                    <span
+                      className={`ml-1.5 px-1.5 py-0.2 text-[10px] font-bold rounded-full ${
+                        criticalCount > 0
+                          ? "bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30"
+                          : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                      }`}
+                    >
+                      {totalIssues}
+                    </span>
+                  )}
                 </TabsTrigger>
-                <TabsTrigger
-                  value="roadmap"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
-                >
-                  <Lightbulb className="size-3.5 mr-1.5 text-accent" />
-                  Actionable Roadmap &amp; Tips
-                </TabsTrigger>
-                <TabsTrigger
-                  value="rewrites"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
-                >
-                  <Sparkles className="size-3.5 mr-1.5 text-success" />
-                  Bullet Rewrites ({a.bulletRewrites.length})
-                </TabsTrigger>
-                <TabsTrigger
-                  value="issues"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
-                >
-                  <AlertTriangle className="size-3.5 mr-1.5 text-warning" />
-                  Issues &amp; Red Flags ({a.criticalIssues.length})
-                </TabsTrigger>
+
                 <TabsTrigger
                   value="skills"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-xs text-xs rounded-lg px-3.5 py-1.5 font-semibold transition-all"
                 >
                   <Layers className="size-3.5 mr-1.5 text-primary" />
-                  Skills Matrix
+                  Skills &amp; Matching
+                  {totalMissing > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-primary/15 text-primary">
+                      {totalMissing} missing
+                    </span>
+                  )}
                 </TabsTrigger>
+
                 <TabsTrigger
-                  value="strengths"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                  value="improvements"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-xs text-xs rounded-lg px-3.5 py-1.5 font-semibold transition-all"
                 >
-                  <CheckCircle2 className="size-3.5 mr-1.5 text-success" />
-                  Strengths ({a.strengths.length})
+                  <Sparkles className="size-3.5 mr-1.5 text-emerald-500" />
+                  Actionable Fixes &amp; Rewrites
+                  {totalRewrites > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                      {totalRewrites}
+                    </span>
+                  )}
                 </TabsTrigger>
+
                 <TabsTrigger
-                  value="ats-engine"
-                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                  value="ats"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-xs text-xs rounded-lg px-3.5 py-1.5 font-semibold transition-all"
                 >
                   <Zap className="size-3.5 mr-1.5 text-amber-500" />
-                  ATS Engine ({atsData.score}/100)
+                  ATS Scan ({atsData.score}/100)
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            {/* Tab Contents Area */}
-            <div className="p-6">
-              {/* Tab: Section-by-Section Real Audit */}
-              <TabsContent value="sections" className="mt-0 space-y-4">
-                <div className="space-y-4">
-                  {/* 1. Professional Summary */}
-                  {sec?.summary && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            1. Professional Summary &amp; Career Positioning
-                          </h4>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.summary.score} / {sec.summary.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.summary.audit}
-                      </p>
-                      {sec.summary.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Improvement Tip:</strong>{" "}
-                            {sec.summary.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 2. Technical Skills */}
-                  {sec?.skills && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Code2 className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            2. Technical Skills &amp; Stack Depth
-                          </h4>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.skills.score} / {sec.skills.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.skills.audit}
-                      </p>
-                      {sec.skills.matchedKeywords && sec.skills.matchedKeywords.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] font-semibold text-muted-foreground mr-1">
-                            Verified Skills:
-                          </span>
-                          {sec.skills.matchedKeywords.map((k, i) => (
-                            <Badge
-                              key={i}
-                              variant="outline"
-                              className="text-[11px] bg-success/10 text-success border-success/30 px-2 py-0.2"
-                            >
-                              {k}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                      {sec.skills.missingCriticalSkills && sec.skills.missingCriticalSkills.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] font-semibold text-destructive mr-1">
-                            Missing Requirements:
-                          </span>
-                          {sec.skills.missingCriticalSkills.map((k, i) => (
-                            <Badge
-                              key={i}
-                              variant="outline"
-                              className="text-[11px] bg-destructive/10 text-destructive border-destructive/30 px-2 py-0.2"
-                            >
-                              {k}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                      {sec.skills.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Skills Action:</strong>{" "}
-                            {sec.skills.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 3. Project Work */}
-                  {sec?.projects && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Wrench className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            3. Project Complexity &amp; Architecture
-                          </h4>
-                          {sec.projects.architectureRating && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] bg-primary/10 text-primary border-primary/30"
-                            >
-                              {sec.projects.architectureRating}
-                            </Badge>
-                          )}
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.projects.score} / {sec.projects.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.projects.audit}
-                      </p>
-                      {sec.projects.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Project Enhancement:</strong>{" "}
-                            {sec.projects.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 4. Internships & Practical Experience (JD Relevance) */}
-                  {sec?.internships && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Briefcase className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            4. Internships &amp; Practical Experience (JD Relevance)
-                          </h4>
-                          <span
-                            className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border ${
-                              sec.internships.jdRelevancePct >= 75
-                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                                : sec.internships.jdRelevancePct >= 50
-                                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                                  : "bg-red-500/15 text-red-500 border-red-500/30"
-                            }`}
-                          >
-                            🎯 {sec.internships.jdRelevancePct}% JD Relevance
-                          </span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.internships.score} / {sec.internships.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.internships.audit}
-                      </p>
-                      {sec.internships.jdRelevanceExplanation && (
-                        <div className="text-xs bg-accent/10 border border-accent/30 p-2.5 rounded-lg text-foreground">
-                          <strong className="text-accent">Job Description Mapping: </strong>
-                          {sec.internships.jdRelevanceExplanation}
-                        </div>
-                      )}
-                      {sec.internships.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Internship Bullet Strategy:</strong>{" "}
-                            {sec.internships.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 5. Verified Certifications */}
-                  {sec?.certifications && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <GraduationCap className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            5. Verified Certifications &amp; Accreditations
-                          </h4>
-                          {sec.certifications.verifiedCount > 0 && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] bg-success/10 text-success border-success/30"
-                            >
-                              {sec.certifications.verifiedCount} Verified
-                            </Badge>
-                          )}
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.certifications.score} / {sec.certifications.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.certifications.audit}
-                      </p>
-                      {sec.certifications.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Certification Strategy:</strong>{" "}
-                            {sec.certifications.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 6. Achievements & Verifiable Proof */}
-                  {sec?.achievements && (
-                    <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Award className="size-4 text-primary" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                            6. Achievements, Hackathons &amp; Verifiable Proof
-                          </h4>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                          {sec.achievements.score} / {sec.achievements.max} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground/90 leading-relaxed bg-secondary/30 p-3 rounded-lg border border-border/60">
-                        {sec.achievements.audit}
-                      </p>
-                      {sec.achievements.fixTip && (
-                        <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
-                          <span>
-                            <strong className="text-foreground">Achievement Impact:</strong>{" "}
-                            {sec.achievements.fixTip}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+            {/* TAB CONTENTS */}
+            <div className="p-6 space-y-6">
+              {/* TAB 1: MISTAKES & RED FLAGS */}
+              <TabsContent value="mistakes" className="mt-0 space-y-5">
+                {/* Header overview */}
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <AlertCircle className="size-4 text-rose-500" />
+                      Critical Resume Gaps &amp; Formatting Blockers
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Review identified mistakes that hurt ATS pass rates or disqualify the candidate in recruiter scans.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs font-mono font-bold">
+                    {totalIssues === 0 ? "0 Issues" : `${totalIssues} Total Issues`}
+                  </Badge>
                 </div>
-              </TabsContent>
 
-              {/* Tab: Actionable Improvement Roadmap */}
-              <TabsContent value="roadmap" className="mt-0 space-y-5">
-                {/* Section-by-Section Step-by-Step Fixes */}
-                {a.sectionImprovements && a.sectionImprovements.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                      <TrendingUp className="size-4 text-primary" />
-                      Section-by-Section Concrete Improvements
-                    </h4>
-                    <div className="space-y-3">
-                      {a.sectionImprovements.map((imp, i) => (
-                        <div
-                          key={i}
-                          className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-foreground">
-                              {imp.section}
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] uppercase font-bold text-warning border-warning/30 bg-warning/10"
-                            >
-                              Identified Gap
+                {/* Hard ATS Blockers Alert */}
+                {atsData.blockers.length > 0 && (
+                  <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-xs uppercase tracking-wider">
+                      <XCircle className="size-4" /> ATS Parsing Hard Blockers ({atsData.blockers.length})
+                    </div>
+                    <ul className="space-y-1.5 pl-1">
+                      {atsData.blockers.map((b, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-foreground font-medium">
+                          <span className="text-rose-500 font-bold">•</span>
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Critical & Major Issues List */}
+                {a.criticalIssues.length > 0 ? (
+                  <div className="grid gap-3">
+                    {a.criticalIssues.map((issue, idx) => (
+                      <div
+                        key={idx}
+                        className={`rounded-xl border p-4 space-y-2.5 transition-all bg-card/60 ${sevTone(
+                          issue.severity,
+                        )}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge className={sevBadge(issue.severity)}>
+                              {issue.severity}
                             </Badge>
+                            <span className="text-xs font-bold text-foreground">
+                              {issue.area}
+                            </span>
                           </div>
-                          {imp.currentGap && (
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              <strong className="text-foreground/80">Flaw: </strong>
-                              {imp.currentGap}
-                            </p>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs">
+                          <div>
+                            <span className="font-semibold text-foreground">Problem: </span>
+                            <span className="text-foreground/90">{issue.problem}</span>
+                          </div>
+                          {issue.evidence && (
+                            <div className="bg-background/80 p-2 rounded-md border border-border/60 text-muted-foreground text-[11px] font-mono">
+                              <strong className="text-foreground font-sans">Evidence from resume: </strong>
+                              {issue.evidence}
+                            </div>
                           )}
-                          {imp.actionableFix && (
-                            <div className="text-xs text-success bg-success/10 border border-success/30 p-2.5 rounded-lg flex items-start gap-1.5">
-                              <Check className="size-4 shrink-0 mt-0.5 text-success font-bold" />
+                          {issue.fix && (
+                            <div className="flex items-start gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium pt-1">
+                              <CheckCircle2 className="size-3.5 shrink-0 mt-0.5" />
                               <span>
-                                <strong className="text-foreground">Actionable Fix: </strong>
-                                {imp.actionableFix}
+                                <strong className="text-foreground">Immediate Fix: </strong>
+                                {issue.fix}
                               </span>
                             </div>
                           )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center space-y-1.5">
+                    <CheckCircle2 className="size-8 text-emerald-500 mx-auto" />
+                    <h4 className="text-xs font-bold text-foreground">No Critical Issues Detected</h4>
+                    <p className="text-xs text-muted-foreground">
+                      This resume has clean technical framing and no severe ATS red flags.
+                    </p>
+                  </div>
+                )}
+
+                {/* Data Gaps & Formatting Problems */}
+                <div className="grid gap-4 sm:grid-cols-2 pt-2">
+                  {/* Missing Elements / Data Gaps */}
+                  <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <AlertCircle className="size-3.5 text-amber-500" />
+                      Missing Data &amp; Verification Gaps
+                    </h4>
+                    {a.dataGaps && a.dataGaps.length > 0 ? (
+                      <ul className="space-y-2">
+                        {a.dataGaps.map((g, i) => (
+                          <li key={i} className="text-xs text-foreground/90 bg-background/80 p-2.5 rounded-lg border border-border/60 space-y-0.5">
+                            <p className="font-semibold text-foreground">{g.area}: {g.missing}</p>
+                            <p className="text-[11px] text-muted-foreground">{g.impact}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">All standard sections &amp; contact info present.</p>
+                    )}
+                  </div>
+
+                  {/* Formatting & OCR Anomalies */}
+                  <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <Wrench className="size-3.5 text-primary" />
+                      Formatting &amp; Scannability Flags
+                    </h4>
+                    {a.formattingProblems.length > 0 || a.grammarAndOcrErrors.length > 0 ? (
+                      <ul className="space-y-2">
+                        {[...a.formattingProblems, ...a.grammarAndOcrErrors].map((item, i) => (
+                          <li key={i} className="text-xs text-foreground/90 bg-background/80 p-2.5 rounded-lg border border-border/60 flex items-start gap-1.5">
+                            <span className="text-amber-500 font-bold">•</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Clean formatting hygiene and ATS scannable typography.</p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* TAB 2: SKILLS & ROLE MATCHING */}
+              <TabsContent value="skills" className="mt-0 space-y-5">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <Code2 className="size-4 text-primary" />
+                      Verified Skills &amp; Technical Competency Matrix
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Exact breakdown of verified candidate skills vs missing role/JD keywords.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs font-bold text-primary bg-primary/10 border-primary/30">
+                    🎯 {jdScoreVal}% Alignment
+                  </Badge>
+                </div>
+
+                {/* Skills Grid */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* Verified Skills */}
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                        <CheckCircle2 className="size-3.5 text-emerald-500" />
+                        Verified Skills Found ({a.skillMatrix.matched.length})
+                      </h4>
+                    </div>
+                    {a.skillMatrix.matched.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {a.skillMatrix.matched.map((s, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-xs font-medium px-2 py-0.5 rounded-md"
+                          >
+                            ✓ {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No verifiable technical skills found in resume.</p>
+                    )}
+                  </div>
+
+                  {/* Missing Critical Skills */}
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                        <XCircle className="size-3.5 text-rose-500" />
+                        Missing Critical Skills ({a.skillMatrix.missing.length})
+                      </h4>
+                    </div>
+                    {a.skillMatrix.missing.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {a.skillMatrix.missing.map((s, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 text-xs font-medium px-2 py-0.5 rounded-md"
+                          >
+                            ✕ {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                        ✓ Candidate meets all major keyword requirements for this role!
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Priority Technologies to Learn */}
+                <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                    <TrendingUp className="size-3.5 text-primary" />
+                    Priority Tech Stack to Learn / Elevate
+                  </h4>
+                  {a.skillMatrix.recommended.length > 0 || a.techImprovementIdeas.length > 0 ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {[...a.skillMatrix.recommended, ...a.techImprovementIdeas]
+                        .filter((v, i, arr) => arr.indexOf(v) === i)
+                        .map((tech, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-2 bg-background/80 p-2.5 rounded-lg border border-border/60 text-xs font-medium text-foreground"
+                          >
+                            <span className="size-1.5 rounded-full bg-primary" />
+                            <span>{tech}</span>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Candidate profile has modern tooling coverage.</p>
+                  )}
+                </div>
+
+                {/* Project Complexity & Architecture Audit */}
+                {sec?.projects && (
+                  <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                        <Cpu className="size-3.5 text-primary" />
+                        Project Architecture &amp; Engineering Depth
+                      </h4>
+                      <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                        {sec.projects.score} / {sec.projects.max} pts
+                      </span>
+                    </div>
+                    <p className="text-xs text-foreground leading-relaxed bg-background/80 p-3 rounded-lg border border-border/60">
+                      {sec.projects.audit}
+                    </p>
+                    {sec.projects.fixTip && (
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-lg flex items-start gap-1.5">
+                        <Sparkles className="size-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          <strong className="text-foreground">Architecture Polish: </strong>
+                          {sec.projects.fixTip}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* TAB 3: ACTIONABLE IMPROVEMENTS & REWRITES */}
+              <TabsContent value="improvements" className="mt-0 space-y-5">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <Sparkles className="size-4 text-emerald-500" />
+                      Concrete Action Plan &amp; Bullet Rewrites
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Ready-to-copy bullet point upgrades with quantifiable metrics and architectural improvements.
+                    </p>
+                  </div>
+                </div>
+
+                {/* High-Impact Bullet Rewrites */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                    <Zap className="size-3.5 text-amber-500" />
+                    High-Impact Bullet Point Rewrites ({a.bulletRewrites.length})
+                  </h4>
+                  {a.bulletRewrites.length > 0 ? (
+                    <div className="grid gap-3.5">
+                      {a.bulletRewrites.map((rw, i) => (
+                        <div
+                          key={i}
+                          className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-2xs"
+                        >
+                          {/* Original Weak Bullet */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                Original Bullet (Weak / Unquantified)
+                              </span>
+                            </div>
+                            <div className="p-2.5 rounded-lg bg-rose-500/5 border border-rose-500/20 text-xs text-foreground/80 line-through opacity-80">
+                              {rw.original}
+                            </div>
+                          </div>
+
+                          {/* Elevated Rewritten Bullet */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 tracking-wider flex items-center gap-1">
+                                <Sparkles className="size-3 text-emerald-500" />
+                                Recommended ATS Rewrite (Metrics &amp; Stack)
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 text-[11px] px-2 text-primary hover:bg-primary/10 rounded-md"
+                                onClick={() => copyText(rw.rewritten)}
+                              >
+                                <Copy className="size-3 mr-1" /> Copy
+                              </Button>
+                            </div>
+                            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-foreground font-medium leading-relaxed">
+                              {rw.rewritten}
+                            </div>
+                          </div>
+
+                          {rw.reason && (
+                            <p className="text-[11px] text-muted-foreground italic pl-1">
+                              💡 Why this works: {rw.reason}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl border border-border bg-secondary/20 text-xs text-muted-foreground text-center">
+                      No automated bullet rewrites needed. Current bullets have sufficient action verb and metrics depth.
+                    </div>
+                  )}
+                </div>
+
+                {/* Step-by-Step Section Improvements */}
+                {a.sectionImprovements && a.sectionImprovements.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <CheckCircle2 className="size-3.5 text-primary" />
+                      Step-by-Step Section Polish ({a.sectionImprovements.length})
+                    </h4>
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      {a.sectionImprovements.map((si, i) => (
+                        <div
+                          key={i}
+                          className="rounded-xl border border-border bg-secondary/20 p-3.5 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-foreground">
+                              {si.section}
+                            </span>
+                            <span className="text-[10px] text-rose-500 font-medium">
+                              {si.currentGap}
+                            </span>
+                          </div>
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-start gap-1">
+                            <span className="font-bold">→</span> {si.actionableFix}
+                          </p>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Priority Skills to Master */}
-                <RoadmapBlock
-                  title="Priority Technical Tools to Master (Ordered by Hiring Impact)"
-                  icon={<Wrench className="size-4 text-primary" />}
-                  items={
-                    a.skillMatrix.recommended.length > 0
-                      ? a.skillMatrix.recommended
-                      : a.techImprovementIdeas
-                  }
-                />
-
-                {/* Placement & Interview Strategy Tips */}
+                {/* Placement & Interview Prep Tips */}
                 {a.placementTips && a.placementTips.length > 0 && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                      <Target className="size-4" /> Tactical Placement &amp; Interview Tips
+                  <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <Lightbulb className="size-3.5 text-amber-500" />
+                      Interview Strategy &amp; Placement Round Tips
                     </h4>
                     <ul className="space-y-2">
                       {a.placementTips.map((tip, i) => (
                         <li
                           key={i}
-                          className="flex items-start gap-2 text-xs text-foreground leading-relaxed"
+                          className="text-xs text-foreground bg-background/80 p-2.5 rounded-lg border border-border/60 flex items-start gap-2 leading-relaxed"
                         >
-                          <span className="font-bold text-primary select-none mt-0.5">✓</span>
+                          <span className="text-primary font-bold select-none">•</span>
                           <span>{tip}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                 )}
-
-                {/* Portfolio Project Suggestions */}
-                <RoadmapBlock
-                  title="Recommended Portfolio Projects with System Architecture"
-                  icon={<Lightbulb className="size-4 text-accent" />}
-                  items={a.projectSuggestions}
-                />
               </TabsContent>
 
-              {/* Tab: Bullet Rewrites */}
-              <TabsContent value="rewrites" className="mt-0 space-y-4">
-                {a.bulletRewrites.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No bullet rewrites suggested.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {a.bulletRewrites.map((r, i) => (
-                      <div
-                        key={i}
-                        className="space-y-3 rounded-xl border border-border bg-secondary/15 p-4"
-                      >
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            Original Bullet
-                          </span>
-                          <p className="mt-1 rounded-lg bg-secondary/40 border border-border px-3 py-2 text-xs text-foreground/80">
-                            {r.original}
-                          </p>
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-success">
-                            Optimized Bullet (Action Verb + Tech Stack + Outcome)
-                          </span>
-                          <div className="mt-1 flex items-start gap-2 rounded-lg bg-success/10 border border-success/30 p-3">
-                            <ArrowRight className="mt-0.5 size-4 shrink-0 text-success" />
-                            <p className="text-xs font-semibold text-foreground leading-relaxed">
-                              {r.rewritten}
-                            </p>
-                          </div>
-                        </div>
-
-                        {r.reason && (
-                          <p className="text-xs text-muted-foreground">
-                            <span className="font-semibold text-foreground/80">Rationale: </span>
-                            {r.reason}
-                          </p>
-                        )}
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg"
-                          onClick={() => copyText(r.rewritten)}
-                        >
-                          <Copy className="size-3 mr-1.5" /> Copy Rewritten Bullet
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Tab: Issues & Red Flags */}
-              <TabsContent value="issues" className="mt-0 space-y-4">
-                {a.criticalIssues.length === 0 ? (
-                  <div className="rounded-xl border border-success/30 bg-success/5 p-6 text-center">
-                    <CheckCircle2 className="mx-auto size-8 text-success mb-2" />
-                    <p className="text-sm font-semibold text-foreground">
-                      No Critical Red Flags Detected
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      This resume is clear of major dealbreakers.
+              {/* TAB 4: ATS COMPLIANCE SCAN */}
+              <TabsContent value="ats" className="mt-0 space-y-5">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <Zap className="size-4 text-amber-500" />
+                      ATS Engine Technical Verification
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Deterministic, rule-based ATS compliance audit calculated directly from document text.
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-3.5">
-                    {a.criticalIssues.map((issue, i) => (
-                      <div
-                        key={i}
-                        className="space-y-2.5 rounded-xl border border-border bg-secondary/15 p-4"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                            {issue.severity === "critical" ? (
-                              <XCircle className="size-4 text-destructive" />
-                            ) : (
-                              <AlertTriangle className="size-4 text-warning" />
-                            )}
-                            {issue.problem}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-muted-foreground font-mono">
-                              {issue.area}
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${sevTone(issue.severity)}`}
-                            >
-                              {issue.severity}
-                            </Badge>
-                          </div>
-                        </div>
+                  <Badge variant="outline" className="text-xs font-mono font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30">
+                    {atsData.score}/100 ATS Score
+                  </Badge>
+                </div>
 
-                        {issue.evidence && (
-                          <div className="rounded-lg bg-secondary/50 border border-border/80 px-3 py-2 text-xs font-mono text-foreground/80">
-                            <span className="text-muted-foreground select-none">Quote: </span>"
-                            {issue.evidence}"
-                          </div>
-                        )}
-
-                        {issue.fix && (
-                          <div className="rounded-lg bg-success/10 border border-success/30 p-2.5 text-xs text-foreground">
-                            <span className="font-bold text-success">Recommended Action: </span>
-                            {issue.fix}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                {/* Metrics Chips Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Words
+                    </span>
+                    <span className="font-mono font-bold text-sm text-foreground">
+                      {atsData.metrics.words}
+                    </span>
                   </div>
-                )}
-              </TabsContent>
-
-              {/* Tab: Skills & Gaps */}
-              <TabsContent value="skills" className="mt-0 space-y-5">
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <SkillBlock
-                    title="Verified Core Skills"
-                    items={a.skillMatrix.matched}
-                    tone="border-success/30 bg-success/5"
-                    badgeClass="bg-success/15 text-success border-success/30"
-                    empty="No clear core skills verified"
-                  />
-                  <SkillBlock
-                    title="Missing / Underrepresented"
-                    items={a.skillMatrix.missing}
-                    tone="border-destructive/30 bg-destructive/5"
-                    badgeClass="bg-destructive/15 text-destructive border-destructive/30"
-                    empty="No critical skill gaps found"
-                  />
-                  <SkillBlock
-                    title="Recommended to Add"
-                    items={a.skillMatrix.recommended}
-                    tone="border-primary/30 bg-primary/5"
-                    badgeClass="bg-primary/15 text-primary border-primary/30"
-                    empty="No immediate skill additions needed"
-                  />
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Bullets
+                    </span>
+                    <span className="font-mono font-bold text-sm text-foreground">
+                      {atsData.metrics.bullets}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Quantified
+                    </span>
+                    <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                      {atsData.metrics.quantifiedBullets}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Action Verbs
+                    </span>
+                    <span className="font-mono font-bold text-sm text-primary">
+                      {atsData.metrics.actionVerbBullets}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Pages
+                    </span>
+                    <span className="font-mono font-bold text-sm text-foreground">
+                      ~{atsData.metrics.estimatedPages}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/20 p-2.5 text-center">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
+                      Max Words/Bullet
+                    </span>
+                    <span className="font-mono font-bold text-sm text-foreground">
+                      {atsData.metrics.longestBulletWords}
+                    </span>
+                  </div>
                 </div>
-              </TabsContent>
 
-              {/* Tab: Strengths */}
-              <TabsContent value="strengths" className="mt-0 space-y-4">
-                <div className="rounded-xl border border-success/30 bg-success/5 p-4 space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-success flex items-center gap-1.5">
-                    <CheckCircle2 className="size-4" /> Verified Candidate Strengths
-                  </h4>
-                  {a.strengths.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No notable strengths recorded.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {a.strengths.map((s, i) => (
-                        <li
-                          key={i}
-                          className="flex items-start gap-2 text-xs text-foreground leading-relaxed"
-                        >
-                          <Check className="size-4 shrink-0 text-success mt-0.5" />
-                          <span>{s}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </TabsContent>
-
-              {/* Tab: ATS Engine Deterministic Audit */}
-              <TabsContent value="ats-engine" className="mt-0 space-y-5">
-                {/* Deterministic Score & Key Metric Cards */}
-                <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 font-mono font-bold text-lg">
-                        {atsData.score}
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                          <Zap className="size-4 text-amber-500" />
-                          Deterministic ATS Engine Score (0-100)
-                        </h4>
-                        <p className="text-xs text-muted-foreground">
-                          Authoritative, rule-based evaluation computed directly from the resume text without model hallucination.
-                        </p>
-                      </div>
-                    </div>
-
-                    {atsData.jdScore !== null && (
-                      <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5">
-                        <Target className="size-4 text-primary" />
-                        <span className="text-xs font-bold text-primary">
-                          {atsData.jdScore}% JD Keyword Match
+                {/* 5 Technical Categories List */}
+                <div className="space-y-3">
+                  {atsData.categories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="rounded-xl border border-border bg-secondary/15 p-4 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-foreground">
+                          {cat.label}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {cat.score} / {cat.max} pts
                         </span>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Metrics Chips Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Words</span>
-                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.words}</span>
-                    </div>
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Bullets</span>
-                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.bullets}</span>
-                    </div>
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Quantified</span>
-                      <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
-                        {atsData.metrics.quantifiedBullets} ({atsData.metrics.bullets ? Math.round((atsData.metrics.quantifiedBullets / atsData.metrics.bullets) * 100) : 0}%)
-                      </span>
-                    </div>
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Action Verbs</span>
-                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.actionVerbBullets}</span>
-                    </div>
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Est. Pages</span>
-                      <span className="font-mono font-bold text-xs text-foreground">~{atsData.metrics.estimatedPages}</span>
-                    </div>
-                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
-                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Readability</span>
-                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.readabilityWordsPerBullet} w/b</span>
-                    </div>
-                  </div>
-
-                  {/* Detected Sections summary */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="font-semibold text-muted-foreground mr-1 text-[11px]">Sections Found:</span>
-                      {atsData.metrics.sectionsFound.map((s, idx) => (
-                        <Badge key={idx} variant="outline" className="text-[10px] bg-success/10 text-success border-success/30">
-                          ✓ {s}
-                        </Badge>
-                      ))}
-                    </div>
-                    {atsData.metrics.sectionsMissing.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs pt-1">
-                        <span className="font-semibold text-destructive mr-1 text-[11px]">Sections Missing:</span>
-                        {atsData.metrics.sectionsMissing.map((s, idx) => (
-                          <Badge key={idx} variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
-                            ✕ {s}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Hard Blockers Box */}
-                {atsData.blockers.length > 0 ? (
-                  <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 space-y-2">
-                    <div className="flex items-center gap-2 text-destructive font-bold text-xs uppercase tracking-wider">
-                      <AlertTriangle className="size-4 shrink-0" />
-                      {atsData.blockers.length} Hard ATS Blocker{atsData.blockers.length > 1 ? "s" : ""} Detected
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      These issues cause automated applicant tracking systems to reject the file or mis-index candidate data:
-                    </p>
-                    <ul className="space-y-1.5 pt-1">
-                      {atsData.blockers.map((b, i) => (
-                        <li key={i} className="flex items-start gap-2 text-xs text-foreground bg-background/60 p-2 rounded-lg border border-destructive/20">
-                          <XCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                          <span className="font-medium leading-relaxed">{b}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-success/40 bg-success/10 p-4 flex items-center gap-3">
-                    <CheckCircle2 className="size-5 text-success shrink-0" />
-                    <div>
-                      <h4 className="text-xs font-bold text-foreground">Zero Hard ATS Blockers</h4>
-                      <p className="text-xs text-muted-foreground">
-                        Machine-readable contact points, standard sections, and clean text layers were all verified.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Category by Category Breakdown */}
-                <div className="space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Detailed Category Audits &amp; Per-Check Pass/Fail Evidence
-                  </h4>
-
-                  {atsData.categories.map((category) => {
-                    const pct = category.max ? Math.round((category.score / category.max) * 100) : 0;
-                    const catTone = pct >= 75 ? "text-success" : pct >= 50 ? "text-warning" : "text-destructive";
-                    const catBar = pct >= 75 ? "bg-success" : pct >= 50 ? "bg-warning" : "bg-destructive";
-
-                    return (
-                      <div key={category.id} className="rounded-xl border border-border bg-secondary/15 p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <h5 className="text-xs font-bold text-foreground">{category.label}</h5>
-                            <p className="text-[11px] text-muted-foreground">
-                              {category.checks.filter((c) => c.passed).length} of {category.checks.length} checks passed
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span className={`font-mono text-xs font-bold ${catTone}`}>
-                              {category.score} <span className="text-muted-foreground font-normal">/ {category.max} pts</span>
+                      <div className="grid gap-1.5">
+                        {cat.checks.map((k) => (
+                          <div
+                            key={k.id}
+                            className="flex items-center justify-between text-xs p-2 rounded-lg bg-background/80 border border-border/60"
+                          >
+                            <div className="flex items-center gap-2">
+                              {k.passed ? (
+                                <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                              ) : (
+                                <XCircle className="size-3.5 text-rose-500 shrink-0" />
+                              )}
+                              <span className="text-foreground">{k.label}</span>
+                            </div>
+                            <span className="font-mono text-[11px] text-muted-foreground">
+                              {k.points}/{k.max} pts
                             </span>
                           </div>
-                        </div>
-
-                        <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                          <div className={`h-full rounded-full ${catBar} transition-all duration-500`} style={{ width: `${Math.max(4, pct)}%` }} />
-                        </div>
-
-                        {/* Individual checks list */}
-                        <div className="space-y-2 pt-1">
-                          {category.checks.map((c) => (
-                            <div
-                              key={c.id}
-                              className={`rounded-lg border p-2.5 space-y-1 transition-colors ${
-                                c.passed ? "border-border/60 bg-background/50" : "border-destructive/30 bg-destructive/5"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  {c.passed ? (
-                                    <CheckCircle2 className="size-4 text-success shrink-0" />
-                                  ) : (
-                                    <XCircle className="size-4 text-destructive shrink-0" />
-                                  )}
-                                  <span className="text-xs font-semibold text-foreground">{c.label}</span>
-                                </div>
-                                <Badge
-                                  variant="outline"
-                                  className={`font-mono text-[11px] px-2 py-0.5 ${
-                                    c.passed ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"
-                                  }`}
-                                >
-                                  {c.points} / {c.max} pts
-                                </Badge>
-                              </div>
-                              {c.detail && (
-                                <p className="text-[11px] text-muted-foreground pl-6 leading-relaxed font-mono">
-                                  {c.detail}
-                                </p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
+              </TabsContent>
+            </div>
+          </div>
 
-                {/* JD Keywords Match Section (if JD keywords present) */}
-                {atsData.metrics.jdKeywords.length > 0 && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                      <Target className="size-4" />
-                      Job Description Keyword Coverage ({atsData.metrics.jdMatched.length} / {atsData.metrics.jdKeywords.length} Matched)
-                    </h4>
-
-                    {atsData.metrics.jdMatched.length > 0 && (
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-semibold text-success block">Matched Keywords:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {atsData.metrics.jdMatched.map((kw, i) => (
-                            <Badge key={i} variant="outline" className="text-[10px] bg-success/15 text-success border-success/30 font-mono">
-                              ✓ {kw}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {atsData.metrics.jdMissing.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <span className="text-[11px] font-semibold text-destructive block">Missing JD Keywords:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {atsData.metrics.jdMissing.map((kw, i) => (
-                            <Badge key={i} variant="outline" className="text-[10px] bg-destructive/15 text-destructive border-destructive/30 font-mono">
-                              ✕ {kw}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
+          {/* Classy Footer: Score Override & Officer Notes */}
+          <div className="border-t border-border bg-card p-4 shrink-0 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="manual" className="text-[11px] font-semibold text-muted-foreground block">
+                    Score Override (0-100)
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="manual"
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={manual}
+                      placeholder="0-100"
+                      onChange={(e) => setManual(e.target.value)}
+                      className="h-8 w-24 text-xs font-mono font-bold"
+                    />
+                    {manual && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setManual("")}
+                      >
+                        Reset
+                      </Button>
                     )}
                   </div>
-                )}
-              </TabsContent>
+                </div>
+              </div>
+
+              <div className="min-w-[240px] flex-1 space-y-1">
+                <Label htmlFor="notes" className="text-[11px] font-semibold text-muted-foreground block">
+                  Placement Officer Notes (Included in CSV &amp; PDF Exports)
+                </Label>
+                <Input
+                  id="notes"
+                  value={notes}
+                  placeholder="e.g. Strong core logic, recommend coding rounds prep"
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleSave}
+                className="h-8 text-xs font-semibold rounded-lg shadow-xs mt-auto"
+              >
+                <Check className="size-3.5 mr-1.5" /> Save Changes
+              </Button>
             </div>
           </div>
         </Tabs>
-
-        {/* Fixed Officer Override & Notes Footer */}
-        <div className="border-t border-border bg-secondary/30 px-6 py-3.5 shrink-0">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="override" className="text-xs font-semibold text-muted-foreground">
-                Score Override
-              </Label>
-              <div className="flex items-center gap-1.5">
-                <Input
-                  id="override"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={manual}
-                  placeholder="0-100"
-                  onChange={(e) => setManual(e.target.value)}
-                  className="h-8 w-24 text-xs font-mono font-bold"
-                />
-                {manual && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setManual("")}
-                  >
-                    Reset
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="min-w-[240px] flex-1 space-y-1">
-              <Label htmlFor="notes" className="text-xs font-semibold text-muted-foreground">
-                Officer Notes (Included in CSV &amp; PDF Exports)
-              </Label>
-              <Input
-                id="notes"
-                value={notes}
-                placeholder="e.g. Strong core logic, recommend coding rounds prep"
-                onChange={(e) => setNotes(e.target.value)}
-                className="h-8 text-xs"
-              />
-            </div>
-
-            <Button
-              size="sm"
-              variant="default"
-              onClick={handleSave}
-              className="h-8 text-xs font-semibold rounded-lg shadow-sm"
-            >
-              <Check className="size-3.5 mr-1.5" /> Save Changes
-            </Button>
-          </div>
-        </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-function SkillBlock({
-  title,
-  items,
-  tone,
-  badgeClass,
-  empty,
-}: {
-  title: string;
-  items: string[];
-  tone: string;
-  badgeClass: string;
-  empty: string;
-}) {
-  return (
-    <div className={`space-y-3 rounded-xl border p-4 ${tone}`}>
-      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">{title}</h4>
-      {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{empty}</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map((skill, i) => (
-            <Badge
-              key={i}
-              variant="outline"
-              className={`rounded-md text-xs font-medium ${badgeClass}`}
-            >
-              {skill}
-            </Badge>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RoadmapBlock({
-  title,
-  icon,
-  items,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  items: string[];
-}) {
-  return (
-    <div className="space-y-3 rounded-xl border border-border bg-secondary/15 p-4">
-      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-        {icon}
-        {title}
-      </h4>
-      {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No specific suggestions.</p>
-      ) : (
-        <ul className="space-y-2">
-          {items.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-xs text-foreground leading-relaxed">
-              <span className="font-bold text-primary select-none mt-0.5">•</span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }

@@ -22,6 +22,7 @@
 import { NVIDIA_BASE, GEMINI_BASE, findModel, DEFAULT_MODEL_ID, type ModelOption } from "./models";
 import { capForPrompt } from "./sanitize";
 import { executeLlmProxy } from "./llm-proxy.server";
+import { classifyRoleArc, detectAiTools } from "./role-taxonomy";
 
 export type LlmSettings = {
   modelId: string;
@@ -134,7 +135,6 @@ const RULES = `Professional Evaluation & Scoring Standards:
 3. NO DUMMY CRITIQUES & NO FILLER TEXT:
    - Never manufacture imaginary typos, filler compliments, or fake flaws. Every critique must cite direct evidence from the resume text. Return [] if clean.`;
 
-
 export function buildMessages(input: {
   fileName: string;
   resumeText: string;
@@ -146,7 +146,25 @@ export function buildMessages(input: {
   const roleName = input.defaultRole?.trim() || "Software Engineer (Entry Level)";
   const hasJd = Boolean(input.jobDescription && input.jobDescription.trim().length >= 5);
   const company = input.companyName?.trim() || "the hiring company";
-  const atsBlock = input.atsFacts ? `\n\n${input.atsFacts}\n` : "";
+
+  // High-level role arc + GenAI / domestic-AI tool intelligence. This lets the
+  // model evaluate ANY job description — including ones that only mention
+  // domestic models (Qwen, DeepSeek, GLM, ERNIE, Kimi) or on-prem GPU stacks —
+  // at a senior, architecture-aware level instead of a flat keyword match.
+  const resumeArc = classifyRoleArc(input.resumeText);
+  const jdTools = hasJd ? detectAiTools(input.jobDescription!) : null;
+  const resumeTools = detectAiTools(input.resumeText);
+  const toolContext = [
+    jdTools && jdTools.hits.length
+      ? `JOB DESCRIPTION AI STACK → ${jdTools.summary}. When the JD names domestic-AI or on-prem models, judge the candidate against THAT ecosystem (e.g. Qwen/DeepSeek/GLM + Ascend/ModelArts), not only global OpenAI/Claude tooling.`
+      : "",
+    resumeTools.hits.length ? `RESUME AI STACK → ${resumeTools.summary}.` : "",
+    `RESUME HIGH-LEVEL ROLE ARC → ${resumeArc.arc}${resumeArc.matched.length ? ` (signals: ${resumeArc.matched.slice(0, 6).join(", ")})` : ""}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const atsBlock = input.atsFacts ? `\nATS PRE-COMPUTED FACTS & SIGNALS:\n${input.atsFacts}\n` : "";
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
@@ -156,6 +174,7 @@ export function buildMessages(input: {
         `FILE NAME: ${input.fileName}\n\n` +
         `EVALUATION MODE: ${hasJd ? `Specific Job Description at ${company}` : `General Role: ${roleName}`}\n\n` +
         (hasJd ? `JOB DESCRIPTION:\n${input.jobDescription?.trim()}\n\n` : "") +
+        (toolContext ? `${toolContext}\n\n` : "") +
         `RESUME TEXT (cleaned and sanitized):\n${capForPrompt(input.resumeText)}\n` +
         atsBlock +
         `\nSCHEMA SPECIFICATION:\n${SCHEMA_SPEC}\n\n` +
@@ -188,7 +207,12 @@ export function extractJson(raw: string): unknown {
       return {
         candidate_name: nameMatch?.[1]?.trim() || "Unnamed candidate",
         overall_score: Number(scoreMatch[1]),
-        readiness_tier: Number(scoreMatch[1]) >= 80 ? "Tier 1: Shortlist Ready" : Number(scoreMatch[1]) >= 60 ? "Tier 2: Needs Minor Polish" : "Tier 3: Overhaul Required",
+        readiness_tier:
+          Number(scoreMatch[1]) >= 80
+            ? "Tier 1: Shortlist Ready"
+            : Number(scoreMatch[1]) >= 60
+              ? "Tier 2: Needs Minor Polish"
+              : "Tier 3: Overhaul Required",
         strengths: ["Evaluated from response text"],
         critical_issues: [],
       };
@@ -270,7 +294,12 @@ export function extractJson(raw: string): unknown {
         if (scoreMatch) {
           return {
             overall_score: Number(scoreMatch[1]),
-            readiness_tier: Number(scoreMatch[1]) >= 80 ? "Tier 1: Shortlist Ready" : Number(scoreMatch[1]) >= 60 ? "Tier 2: Needs Minor Polish" : "Tier 3: Overhaul Required",
+            readiness_tier:
+              Number(scoreMatch[1]) >= 80
+                ? "Tier 1: Shortlist Ready"
+                : Number(scoreMatch[1]) >= 60
+                  ? "Tier 2: Needs Minor Polish"
+                  : "Tier 3: Overhaul Required",
             strengths: ["Recovered candidate metrics"],
           };
         }

@@ -29,7 +29,12 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { MasterTable, type MasterRow } from "@/components/MasterTable";
 import { RectifyDrawer, type RectifyTarget } from "@/components/RectifyDrawer";
 import { SettingsDialog } from "@/components/SettingsDialog";
-import { effectiveScore, normalizeAnalysis, createRuleBasedAnalysis, type Analysis } from "@/lib/analysis-types";
+import {
+  effectiveScore,
+  normalizeAnalysis,
+  createRuleBasedAnalysis,
+  type Analysis,
+} from "@/lib/analysis-types";
 import { runAtsEngine, atsFactSheet, type AtsReport } from "@/lib/ats-engine";
 import { collectFiles, extractText, type ExtractedFile } from "@/lib/extract";
 import { LlmError, callModel, DEFAULT_SETTINGS, type LlmSettings } from "@/lib/llm";
@@ -41,6 +46,8 @@ import {
   clearAnalyses,
   deleteStoredAnalysis,
   deleteStoredAnalyses,
+  markAnalysisInFlight,
+  getInFlightIds,
   type StoredAnalysis,
 } from "@/lib/storage";
 import { getPublicSystemInfoFn } from "@/lib/database.server";
@@ -123,7 +130,6 @@ function Index() {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const queueRef = useRef<RateLimitedQueue<Analysis> | null>(null);
 
-
   const refreshSystemInfo = useCallback(async () => {
     try {
       const info = await getPublicSystemInfoFn();
@@ -197,22 +203,27 @@ function Index() {
     void loadAnalyses()
       .then((saved) => {
         if (saved && Array.isArray(saved) && saved.length > 0) {
+          const inFlightIds = getInFlightIds(saved);
           setItems((prev) => {
             if (prev.length > 0) return prev;
-            return saved
+            const restored = saved
               .filter((s) => s && (s.analysis || s.candidate_name))
               .map((s) => {
-                const normalized = normalizeAnalysis(s.analysis ?? s);
+                const isInFlight = inFlightIds.includes(s.id);
+                const normalized =
+                  s.analysis && (s.analysis as unknown as { candidateName?: string })?.candidateName
+                    ? normalizeAnalysis(s.analysis ?? s)
+                    : null;
                 return {
                   id: s.id || Math.random().toString(36).slice(2),
                   file: {
-                    name: s.file_name || `${normalized.candidateName}.pdf`,
+                    name: s.file_name || `${normalized?.candidateName ?? "candidate"}.pdf`,
                     bytes: new Uint8Array(0),
                     kind: "pdf" as const,
                   },
-                  status: "done" as Status,
-                  progress: 100,
-                  message: "",
+                  status: (isInFlight ? "queued" : "done") as Status,
+                  progress: isInFlight ? 0 : 100,
+                  message: isInFlight ? "Interrupted — queued for resume" : "",
                   attempt: 1,
                   rawText: s.raw_text || "",
                   cleanText: s.clean_text || "",
@@ -222,6 +233,15 @@ function Index() {
                   durationMs: null,
                 };
               });
+            // Any in-flight records are surfaced as queued so the user can hit
+            // "Start Batch Analysis" to resume them (realtime persistence means
+            // the work already survived a crash/refresh).
+            if (inFlightIds.length > 0) {
+              toast.info(
+                `${inFlightIds.length} interrupted candidate(s) restored from cloud — press Start to resume.`,
+              );
+            }
+            return restored;
           });
         }
       })
@@ -248,7 +268,6 @@ function Index() {
       window.dispatchEvent(new CustomEvent("rr:model-changed", { detail: next.modelId }));
     }
   }, []);
-
 
   /* ------------------------------ file intake ----------------------------- */
 
@@ -332,7 +351,6 @@ function Index() {
     },
     [patch],
   );
-
 
   /* ------------------------------- analysis ------------------------------- */
 
@@ -427,8 +445,12 @@ function Index() {
 
       const activeJd =
         overrideJd !== undefined
-          ? (typeof overrideJd === "string" && overrideJd.trim() ? overrideJd.trim() : undefined)
-          : (useJd && jd.trim() ? jd.trim() : undefined);
+          ? typeof overrideJd === "string" && overrideJd.trim()
+            ? overrideJd.trim()
+            : undefined
+          : useJd && jd.trim()
+            ? jd.trim()
+            : undefined;
 
       // Run deterministic rule-based ATS engine
       const atsReport = runAtsEngine(clean, activeJd);
@@ -463,8 +485,10 @@ function Index() {
         // Blend overallScore: 70% ATS engine + 30% LLM audit
         const blendedScore = Math.round(atsReport.score * 0.7 + normalized.overallScore * 0.3);
         normalized.overallScore = Math.max(0, Math.min(100, blendedScore));
-        if (atsReport.jdScore !== null) {
+        if (typeof atsReport.jdScore === "number") {
           normalized.jdScore = atsReport.jdScore;
+        } else if (typeof normalized.jdScore !== "number") {
+          normalized.jdScore = Math.max(0, Math.min(100, Math.round(normalized.overallScore * 0.88)));
         }
         normalized.ats = atsReport;
         return normalized;
@@ -474,7 +498,9 @@ function Index() {
         const isFormatOrJson =
           msg.includes("JSON") || msg.includes("parse") || msg.includes("empty") || attempt >= 2;
         if (isFormatOrJson) {
-          console.warn(`[analyzeOne] Model response format issue for ${item.file.name}: ${msg}. Auto-recovering with Deterministic ATS Engine.`);
+          console.warn(
+            `[analyzeOne] Model response format issue for ${item.file.name}: ${msg}. Auto-recovering with Deterministic ATS Engine.`,
+          );
           return createRuleBasedAnalysis(
             atsReport,
             item.file.name,
@@ -538,6 +564,15 @@ function Index() {
         onStart: (id, attempt) => {
           started.set(id, Date.now());
           patch(id, { attempt });
+          // Realtime checkpoint: stream an in-flight record to the cloud the
+          // instant this candidate starts (not at end-of-batch dump).
+          const item = itemsRef.current.find((i) => i.id === id);
+          void markAnalysisInFlight({
+            id,
+            fileName: item?.file.name ?? id,
+            cleanText: item?.cleanText,
+            rawText: item?.rawText,
+          });
         },
         onSuccess: (id, analysis) => {
           patch(id, {
@@ -590,7 +625,19 @@ function Index() {
     );
 
     void queue.run();
-  }, [items, settings, concurrency, cooldownSec, maxRetries, patch, analyzeOne, useJd, jd, ruleBasedOnly, systemInfo]);
+  }, [
+    items,
+    settings,
+    concurrency,
+    cooldownSec,
+    maxRetries,
+    patch,
+    analyzeOne,
+    useJd,
+    jd,
+    ruleBasedOnly,
+    systemInfo,
+  ]);
 
   // Mirror items into a ref so queue tasks always read fresh text/edits.
   const itemsRef = useRef(items);
@@ -643,7 +690,6 @@ function Index() {
       doneRows: done.map((i) => ({ id: i.id, fileName: i.file.name, analysis: i.analysis! })),
     };
   }, [items, shortlistCutoff]);
-
 
   const overallProgress = stats.total ? (stats.done / stats.total) * 100 : 0;
 
@@ -885,9 +931,7 @@ function Index() {
             setRunning(false);
             setCooldownLeft(0);
             toast.success(
-              activeJd
-                ? "Job Description re-evaluation complete."
-                : "Re-evaluation complete.",
+              activeJd ? "Job Description re-evaluation complete." : "Re-evaluation complete.",
             );
           },
         },
@@ -912,7 +956,19 @@ function Index() {
           : `Started re-evaluating ${targetItems.length} candidate(s).`,
       );
     },
-    [running, jd, useJd, settings, systemInfo, concurrency, cooldownSec, maxRetries, patch, analyzeOne, ruleBasedOnly],
+    [
+      running,
+      jd,
+      useJd,
+      settings,
+      systemInfo,
+      concurrency,
+      cooldownSec,
+      maxRetries,
+      patch,
+      analyzeOne,
+      ruleBasedOnly,
+    ],
   );
 
   const exportPdf = useCallback(async (id: string) => {
@@ -926,27 +982,43 @@ function Index() {
     }
   }, []);
 
-  const doExportCsv = useCallback(async (selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
-    const target = selectedRows && selectedRows.length ? selectedRows : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
-    if (!target.length) return;
-    try {
-      await exportCsv(target);
-      toast.success(`CSV with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`);
-    } catch (e) {
-      toast.error(`CSV export failed: ${e instanceof Error ? e.message : "unknown error"}`);
-    }
-  }, [stats.doneRows]);
+  const doExportCsv = useCallback(
+    async (selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
+      const target =
+        selectedRows && selectedRows.length
+          ? selectedRows
+          : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
+      if (!target.length) return;
+      try {
+        await exportCsv(target);
+        toast.success(
+          `CSV with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`,
+        );
+      } catch (e) {
+        toast.error(`CSV export failed: ${e instanceof Error ? e.message : "unknown error"}`);
+      }
+    },
+    [stats.doneRows],
+  );
 
-  const doExportMd = useCallback((selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
-    const target = selectedRows && selectedRows.length ? selectedRows : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
-    if (!target.length) return;
-    try {
-      exportBatchMarkdown(target);
-      toast.success(`Markdown report with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`);
-    } catch (e) {
-      toast.error(`Markdown export failed: ${e instanceof Error ? e.message : "unknown error"}`);
-    }
-  }, [stats.doneRows]);
+  const doExportMd = useCallback(
+    (selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
+      const target =
+        selectedRows && selectedRows.length
+          ? selectedRows
+          : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
+      if (!target.length) return;
+      try {
+        exportBatchMarkdown(target);
+        toast.success(
+          `Markdown report with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`,
+        );
+      } catch (e) {
+        toast.error(`Markdown export failed: ${e instanceof Error ? e.message : "unknown error"}`);
+      }
+    },
+    [stats.doneRows],
+  );
 
   const retryFailed = useCallback(() => {
     setItems((prev) =>
@@ -1011,7 +1083,6 @@ function Index() {
               onSave={persist}
             />
           </div>
-
         </div>
       </header>
 
@@ -1246,10 +1317,12 @@ function AnalyzeView({
               <Upload className="size-6" />
             </div>
             <p className="mt-3 text-sm font-semibold text-foreground">
-              Drop resumes or a <span className="text-primary font-bold">.ZIP archive</span> here, or browse
+              Drop resumes or a <span className="text-primary font-bold">.ZIP archive</span> here,
+              or browse
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Supports bulk PDF, DOCX and nested ZIP files. Text extraction runs entirely in your browser.
+              Supports bulk PDF, DOCX and nested ZIP files. Text extraction runs entirely in your
+              browser.
             </p>
           </label>
 
@@ -1258,21 +1331,21 @@ function AnalyzeView({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Target className="size-4 text-primary" />
-                <Label htmlFor="jd-toggle" className="text-xs font-semibold text-foreground cursor-pointer">
+                <Label
+                  htmlFor="jd-toggle"
+                  className="text-xs font-semibold text-foreground cursor-pointer"
+                >
                   Match Against Target Job Description (JD)
                 </Label>
               </div>
-              <Switch
-                id="jd-toggle"
-                checked={control.useJd}
-                onCheckedChange={control.setUseJd}
-              />
+              <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
             </div>
 
             {control.useJd && (
               <div className="space-y-2 pt-1 animate-in fade-in slide-in-from-top-1">
                 <p className="text-[11px] text-muted-foreground">
-                  Paste the hiring requirements or JD below. The engine will evaluate each candidate's exact fit, missing skills, and calculate a dedicated JD Match %.
+                  Paste the hiring requirements or JD below. The engine will evaluate each
+                  candidate's exact fit, missing skills, and calculate a dedicated JD Match %.
                 </p>
                 <Textarea
                   value={control.jd}
@@ -1308,7 +1381,9 @@ function AnalyzeView({
               <div className="space-y-0.5">
                 <h2 className="text-sm font-bold text-foreground">Screening Engine</h2>
                 <p className="text-xs text-muted-foreground">
-                  {control.ruleBasedOnly ? "Zero AI · Instant ATS Parser" : `Using ${activeModel.label}`}
+                  {control.ruleBasedOnly
+                    ? "Zero AI · Instant ATS Parser"
+                    : `Using ${activeModel.label}`}
                 </p>
               </div>
               <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
@@ -1322,12 +1397,16 @@ function AnalyzeView({
               <div className="space-y-0.5 pr-2">
                 <div className="flex items-center gap-1.5">
                   <Zap className="size-3.5 text-primary fill-primary" />
-                  <Label htmlFor="rule-based-mode" className="text-xs font-bold text-foreground cursor-pointer">
+                  <Label
+                    htmlFor="rule-based-mode"
+                    className="text-xs font-bold text-foreground cursor-pointer"
+                  >
                     Rule-Based ATS Engine Only
                   </Label>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Zero AI tokens & instant speed. Scores resumes deterministically using 5-category ATS rules without model calls.
+                  Zero AI tokens & instant speed. Scores resumes deterministically using 5-category
+                  ATS rules without model calls.
                 </p>
               </div>
               <Switch
@@ -1340,9 +1419,12 @@ function AnalyzeView({
             {/* Screening Concurrency & Cooldown Tuning */}
             <div className="space-y-3.5 rounded-xl border border-border/80 bg-secondary/20 p-3.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-foreground">Worker Concurrency &amp; Cooldown</span>
+                <span className="text-xs font-bold text-foreground">
+                  Worker Concurrency &amp; Cooldown
+                </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  {control.concurrency} worker{control.concurrency > 1 ? "s" : ""} · {control.cooldownSec}s delay
+                  {control.concurrency} worker{control.concurrency > 1 ? "s" : ""} ·{" "}
+                  {control.cooldownSec}s delay
                 </span>
               </div>
 
@@ -1443,10 +1525,10 @@ function AnalyzeView({
                     {control.cooldownSec === 0
                       ? "0s (Instant)"
                       : control.cooldownSec >= 60
-                      ? `${Math.floor(control.cooldownSec / 60)}m ${
-                          control.cooldownSec % 60 ? `${control.cooldownSec % 60}s` : ""
-                        } delay`
-                      : `${control.cooldownSec}s delay`}
+                        ? `${Math.floor(control.cooldownSec / 60)}m ${
+                            control.cooldownSec % 60 ? `${control.cooldownSec % 60}s` : ""
+                          } delay`
+                        : `${control.cooldownSec}s delay`}
                   </span>
                 </div>
 
@@ -1648,7 +1730,8 @@ function AnalyzeView({
                 Candidate Rankings &amp; Audit
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {stats.doneRows.length} candidates assessed · {stats.shortlisted} meet shortlist threshold (≥{control.shortlistCutoff}%)
+                {stats.doneRows.length} candidates assessed · {stats.shortlisted} meet shortlist
+                threshold (≥{control.shortlistCutoff}%)
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

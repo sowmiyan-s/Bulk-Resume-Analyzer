@@ -161,7 +161,11 @@ export function Leaderboard({
         (a.analysis.candidateName || "").localeCompare(b.analysis.candidateName || ""),
       tier: (a, b) =>
         (TIER_ORDER[a.analysis.readinessTier] ?? 99) - (TIER_ORDER[b.analysis.readinessTier] ?? 99),
-      jd: (a, b) => (a.analysis.jdScore ?? -1) - (b.analysis.jdScore ?? -1),
+      jd: (a, b) => {
+        const scoreA = typeof a.analysis.jdScore === "number" ? a.analysis.jdScore : Math.round(effectiveScore(a.analysis) * 0.88);
+        const scoreB = typeof b.analysis.jdScore === "number" ? b.analysis.jdScore : Math.round(effectiveScore(b.analysis) * 0.88);
+        return scoreA - scoreB;
+      },
       issues: (a, b) =>
         ((a.analysis.criticalIssues || []).length +
           (a.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length * 5) -
@@ -662,11 +666,10 @@ export function Leaderboard({
                       )}
                     </TableCell>
                     <TableCell className="text-xs font-medium">
-                      {a.jdScore !== null ? (
-                        <span className="text-foreground font-semibold">{a.jdScore}%</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      {(() => {
+                        const jdVal = typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
+                        return <span className="text-foreground font-semibold">{jdVal}%</span>;
+                      })()}
                     </TableCell>
                     <TableCell className="text-xs">
                       <span
