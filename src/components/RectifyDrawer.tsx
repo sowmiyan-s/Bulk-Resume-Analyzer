@@ -21,6 +21,7 @@ import {
   TrendingUp,
   Wrench,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,6 +38,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { effectiveScore, tierTone, type Analysis, type Issue } from "@/lib/analysis-types";
+import { runAtsEngine, type AtsReport } from "@/lib/ats-engine";
 import type { TextFix } from "@/lib/sanitize";
 import { ScoreRing } from "./ScoreRing";
 
@@ -101,6 +103,7 @@ export function RectifyDrawer({
 
   if (!target) return null;
   const a = target.analysis;
+  const atsData: AtsReport = a.ats ?? runAtsEngine(target.cleanText || target.rawText || "");
 
   const handleSave = () => {
     const parsed = manual.trim() === "" ? null : Number(manual);
@@ -340,6 +343,13 @@ export function RectifyDrawer({
                 >
                   <CheckCircle2 className="size-3.5 mr-1.5 text-success" />
                   Strengths ({a.strengths.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="ats-engine"
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm text-xs rounded-lg px-3 py-1.5 font-semibold"
+                >
+                  <Zap className="size-3.5 mr-1.5 text-amber-500" />
+                  ATS Engine ({atsData.score}/100)
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -838,6 +848,228 @@ export function RectifyDrawer({
                     </ul>
                   )}
                 </div>
+              </TabsContent>
+
+              {/* Tab: ATS Engine Deterministic Audit */}
+              <TabsContent value="ats-engine" className="mt-0 space-y-5">
+                {/* Deterministic Score & Key Metric Cards */}
+                <div className="rounded-xl border border-border bg-secondary/15 p-4 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 font-mono font-bold text-lg">
+                        {atsData.score}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                          <Zap className="size-4 text-amber-500" />
+                          Deterministic ATS Engine Score (0-100)
+                        </h4>
+                        <p className="text-xs text-muted-foreground">
+                          Authoritative, rule-based evaluation computed directly from the resume text without model hallucination.
+                        </p>
+                      </div>
+                    </div>
+
+                    {atsData.jdScore !== null && (
+                      <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/30 px-3 py-1.5">
+                        <Target className="size-4 text-primary" />
+                        <span className="text-xs font-bold text-primary">
+                          {atsData.jdScore}% JD Keyword Match
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metrics Chips Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Words</span>
+                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.words}</span>
+                    </div>
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Bullets</span>
+                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.bullets}</span>
+                    </div>
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Quantified</span>
+                      <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                        {atsData.metrics.quantifiedBullets} ({atsData.metrics.bullets ? Math.round((atsData.metrics.quantifiedBullets / atsData.metrics.bullets) * 100) : 0}%)
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Action Verbs</span>
+                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.actionVerbBullets}</span>
+                    </div>
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Est. Pages</span>
+                      <span className="font-mono font-bold text-xs text-foreground">~{atsData.metrics.estimatedPages}</span>
+                    </div>
+                    <div className="rounded-lg border border-border/70 bg-background/60 p-2 text-center">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Readability</span>
+                      <span className="font-mono font-bold text-xs text-foreground">{atsData.metrics.readabilityWordsPerBullet} w/b</span>
+                    </div>
+                  </div>
+
+                  {/* Detected Sections summary */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-semibold text-muted-foreground mr-1 text-[11px]">Sections Found:</span>
+                      {atsData.metrics.sectionsFound.map((s, idx) => (
+                        <Badge key={idx} variant="outline" className="text-[10px] bg-success/10 text-success border-success/30">
+                          ✓ {s}
+                        </Badge>
+                      ))}
+                    </div>
+                    {atsData.metrics.sectionsMissing.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs pt-1">
+                        <span className="font-semibold text-destructive mr-1 text-[11px]">Sections Missing:</span>
+                        {atsData.metrics.sectionsMissing.map((s, idx) => (
+                          <Badge key={idx} variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
+                            ✕ {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Hard Blockers Box */}
+                {atsData.blockers.length > 0 ? (
+                  <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-destructive font-bold text-xs uppercase tracking-wider">
+                      <AlertTriangle className="size-4 shrink-0" />
+                      {atsData.blockers.length} Hard ATS Blocker{atsData.blockers.length > 1 ? "s" : ""} Detected
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      These issues cause automated applicant tracking systems to reject the file or mis-index candidate data:
+                    </p>
+                    <ul className="space-y-1.5 pt-1">
+                      {atsData.blockers.map((b, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-foreground bg-background/60 p-2 rounded-lg border border-destructive/20">
+                          <XCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <span className="font-medium leading-relaxed">{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-success/40 bg-success/10 p-4 flex items-center gap-3">
+                    <CheckCircle2 className="size-5 text-success shrink-0" />
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground">Zero Hard ATS Blockers</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Machine-readable contact points, standard sections, and clean text layers were all verified.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Category by Category Breakdown */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Detailed Category Audits &amp; Per-Check Pass/Fail Evidence
+                  </h4>
+
+                  {atsData.categories.map((category) => {
+                    const pct = category.max ? Math.round((category.score / category.max) * 100) : 0;
+                    const catTone = pct >= 75 ? "text-success" : pct >= 50 ? "text-warning" : "text-destructive";
+                    const catBar = pct >= 75 ? "bg-success" : pct >= 50 ? "bg-warning" : "bg-destructive";
+
+                    return (
+                      <div key={category.id} className="rounded-xl border border-border bg-secondary/15 p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <h5 className="text-xs font-bold text-foreground">{category.label}</h5>
+                            <p className="text-[11px] text-muted-foreground">
+                              {category.checks.filter((c) => c.passed).length} of {category.checks.length} checks passed
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`font-mono text-xs font-bold ${catTone}`}>
+                              {category.score} <span className="text-muted-foreground font-normal">/ {category.max} pts</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                          <div className={`h-full rounded-full ${catBar} transition-all duration-500`} style={{ width: `${Math.max(4, pct)}%` }} />
+                        </div>
+
+                        {/* Individual checks list */}
+                        <div className="space-y-2 pt-1">
+                          {category.checks.map((c) => (
+                            <div
+                              key={c.id}
+                              className={`rounded-lg border p-2.5 space-y-1 transition-colors ${
+                                c.passed ? "border-border/60 bg-background/50" : "border-destructive/30 bg-destructive/5"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  {c.passed ? (
+                                    <CheckCircle2 className="size-4 text-success shrink-0" />
+                                  ) : (
+                                    <XCircle className="size-4 text-destructive shrink-0" />
+                                  )}
+                                  <span className="text-xs font-semibold text-foreground">{c.label}</span>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={`font-mono text-[11px] px-2 py-0.5 ${
+                                    c.passed ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"
+                                  }`}
+                                >
+                                  {c.points} / {c.max} pts
+                                </Badge>
+                              </div>
+                              {c.detail && (
+                                <p className="text-[11px] text-muted-foreground pl-6 leading-relaxed font-mono">
+                                  {c.detail}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* JD Keywords Match Section (if JD keywords present) */}
+                {atsData.metrics.jdKeywords.length > 0 && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                      <Target className="size-4" />
+                      Job Description Keyword Coverage ({atsData.metrics.jdMatched.length} / {atsData.metrics.jdKeywords.length} Matched)
+                    </h4>
+
+                    {atsData.metrics.jdMatched.length > 0 && (
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-success block">Matched Keywords:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {atsData.metrics.jdMatched.map((kw, i) => (
+                            <Badge key={i} variant="outline" className="text-[10px] bg-success/15 text-success border-success/30 font-mono">
+                              ✓ {kw}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {atsData.metrics.jdMissing.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-[11px] font-semibold text-destructive block">Missing JD Keywords:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {atsData.metrics.jdMissing.map((kw, i) => (
+                            <Badge key={i} variant="outline" className="text-[10px] bg-destructive/15 text-destructive border-destructive/30 font-mono">
+                              ✕ {kw}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </TabsContent>
             </div>
           </div>

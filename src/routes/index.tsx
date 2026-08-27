@@ -29,7 +29,8 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { MasterTable, type MasterRow } from "@/components/MasterTable";
 import { RectifyDrawer, type RectifyTarget } from "@/components/RectifyDrawer";
 import { SettingsDialog } from "@/components/SettingsDialog";
-import { effectiveScore, normalizeAnalysis, type Analysis } from "@/lib/analysis-types";
+import { effectiveScore, normalizeAnalysis, createRuleBasedAnalysis, type Analysis } from "@/lib/analysis-types";
+import { runAtsEngine, atsFactSheet, type AtsReport } from "@/lib/ats-engine";
 import { collectFiles, extractText, type ExtractedFile } from "@/lib/extract";
 import { LlmError, callModel, DEFAULT_SETTINGS, type LlmSettings } from "@/lib/llm";
 import { findModel } from "@/lib/models";
@@ -111,6 +112,7 @@ function Index() {
   const [tab, setTab] = useState<"analyze" | "leaderboard">("analyze");
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
+  const [ruleBasedOnly, setRuleBasedOnly] = useState(false);
   const [cooldownSec, setCooldownSec] = useState(0);
   const [concurrency, setConcurrency] = useState(10);
   const [maxRetries, setMaxRetries] = useState(3);
@@ -428,6 +430,21 @@ function Index() {
           ? (typeof overrideJd === "string" && overrideJd.trim() ? overrideJd.trim() : undefined)
           : (useJd && jd.trim() ? jd.trim() : undefined);
 
+      // Run deterministic rule-based ATS engine
+      const atsReport = runAtsEngine(clean, activeJd);
+
+      if (ruleBasedOnly) {
+        return createRuleBasedAnalysis(
+          atsReport,
+          item.file.name,
+          clean,
+          activeJd,
+          settings.defaultRole,
+        );
+      }
+
+      const atsFacts = atsFactSheet(atsReport);
+
       try {
         const raw2 = await callModel(
           {
@@ -435,18 +452,27 @@ function Index() {
             resumeText: clean,
             defaultRole: settings.defaultRole,
             companyName: settings.companyName,
+            atsFacts,
             ...(activeJd ? { jobDescription: activeJd } : {}),
           },
           settings,
           signal,
         );
 
-        return normalizeAnalysis(raw2);
+        const normalized = normalizeAnalysis(raw2, atsReport);
+        // Blend overallScore: 70% ATS engine + 30% LLM audit
+        const blendedScore = Math.round(atsReport.score * 0.7 + normalized.overallScore * 0.3);
+        normalized.overallScore = Math.max(0, Math.min(100, blendedScore));
+        if (atsReport.jdScore !== null) {
+          normalized.jdScore = atsReport.jdScore;
+        }
+        normalized.ats = atsReport;
+        return normalized;
       } finally {
         clearInterval(timer);
       }
     },
-    [patch, settings, useJd, jd],
+    [patch, settings, useJd, jd, ruleBasedOnly],
   );
 
   const runBatch = useCallback(() => {
@@ -460,6 +486,7 @@ function Index() {
       Boolean(systemInfo.hasServerGeminiKey);
 
     const hasKey =
+      ruleBasedOnly ||
       activeM.provider === "litellm" ||
       activeM.provider === "openai-compatible" ||
       activeM.provider === "ollama" ||
@@ -547,7 +574,7 @@ function Index() {
     );
 
     void queue.run();
-  }, [items, settings, concurrency, cooldownSec, maxRetries, patch, analyzeOne, useJd, jd]);
+  }, [items, settings, concurrency, cooldownSec, maxRetries, patch, analyzeOne, useJd, jd, ruleBasedOnly, systemInfo]);
 
   // Mirror items into a ref so queue tasks always read fresh text/edits.
   const itemsRef = useRef(items);
@@ -869,7 +896,7 @@ function Index() {
           : `Started re-evaluating ${targetItems.length} candidate(s).`,
       );
     },
-    [running, jd, useJd, settings, systemInfo, concurrency, cooldownSec, maxRetries, patch, analyzeOne],
+    [running, jd, useJd, settings, systemInfo, concurrency, cooldownSec, maxRetries, patch, analyzeOne, ruleBasedOnly],
   );
 
   const exportPdf = useCallback(async (id: string) => {
@@ -883,13 +910,25 @@ function Index() {
     }
   }, []);
 
-  const doExportCsv = useCallback(async () => {
-    if (!stats.doneRows.length) return;
+  const doExportCsv = useCallback(async (selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
+    const target = selectedRows && selectedRows.length ? selectedRows : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
+    if (!target.length) return;
     try {
-      await exportCsv(stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis })));
-      toast.success(`CSV with ${stats.doneRows.length} candidates downloaded.`);
+      await exportCsv(target);
+      toast.success(`CSV with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`);
     } catch (e) {
       toast.error(`CSV export failed: ${e instanceof Error ? e.message : "unknown error"}`);
+    }
+  }, [stats.doneRows]);
+
+  const doExportMd = useCallback((selectedRows?: Array<{ fileName: string; analysis: Analysis }>) => {
+    const target = selectedRows && selectedRows.length ? selectedRows : stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis }));
+    if (!target.length) return;
+    try {
+      exportBatchMarkdown(target);
+      toast.success(`Markdown report with ${target.length} candidate${target.length > 1 ? "s" : ""} downloaded.`);
+    } catch (e) {
+      toast.error(`Markdown export failed: ${e instanceof Error ? e.message : "unknown error"}`);
     }
   }, [stats.doneRows]);
 
@@ -995,10 +1034,9 @@ function Index() {
               onReevaluateMany: (ids) => reanalyzeWithCurrentJd(ids),
               onReevaluateAllJd: () => reanalyzeWithCurrentJd(),
               onExportCsv: doExportCsv,
-              onExportMd: () =>
-                exportBatchMarkdown(
-                  stats.doneRows.map(({ fileName, analysis }) => ({ fileName, analysis })),
-                ),
+              onExportMd: () => doExportMd(),
+              onExportCsvSelected: doExportCsv,
+              onExportMdSelected: doExportMd,
               onOpen: setDrawerId,
               onExportPdf: (id) => void exportPdf(id),
               setDragging,
@@ -1008,6 +1046,8 @@ function Index() {
               setUseJd,
               jd,
               setJd,
+              ruleBasedOnly,
+              setRuleBasedOnly,
               cooldownSec,
               setCooldownSec,
               concurrency,
@@ -1032,8 +1072,12 @@ function Index() {
             <Leaderboard
               rows={stats.doneRows}
               onOpen={setDrawerId}
+              onExportCsvSelected={doExportCsv}
+              onExportMdSelected={doExportMd}
               onDelete={deleteItem}
+              onDeleteMany={deleteManyItems}
               onReevaluate={(id) => reanalyzeWithCurrentJd([id])}
+              onReevaluateMany={(ids) => reanalyzeWithCurrentJd(ids)}
               hasActiveJd={hasActiveJd}
               shortlistCutoff={shortlistCutoff}
               onShortlistCutoffChange={setShortlistCutoff}
@@ -1127,6 +1171,8 @@ function AnalyzeView({
     onReevaluateAllJd?: () => void;
     onExportCsv: () => void;
     onExportMd: () => void;
+    onExportCsvSelected?: (rows: import("@/components/MasterTable").MasterRow[]) => void;
+    onExportMdSelected?: (rows: import("@/components/MasterTable").MasterRow[]) => void;
     onOpen: (id: string) => void;
     onExportPdf: (id: string) => void;
     setDragging: (v: boolean) => void;
@@ -1136,6 +1182,8 @@ function AnalyzeView({
     setUseJd: (v: boolean) => void;
     jd: string;
     setJd: (v: string) => void;
+    ruleBasedOnly: boolean;
+    setRuleBasedOnly: (v: boolean) => void;
     cooldownSec: number;
     setCooldownSec: (v: number) => void;
     concurrency: number;
@@ -1175,79 +1223,70 @@ function AnalyzeView({
             onDrop={(e) => {
               e.preventDefault();
               handlers.setDragging(false);
-              void handlers.onFiles(e.dataTransfer.files);
+              handlers.onFiles(e.dataTransfer.files);
             }}
-            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all ${
-              dragging.current
-                ? "border-primary bg-primary/5"
-                : "border-border bg-secondary/30 hover:border-primary/60 hover:bg-secondary/50"
-            }`}
+            className="panel relative flex cursor-pointer flex-col items-center justify-center border-2 border-dashed border-border/80 px-6 py-12 text-center transition-colors hover:border-primary/50 hover:bg-secondary/20"
           >
-            <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-secondary text-foreground">
-              <Upload className="size-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-semibold text-foreground">
-              Drag and drop resumes here, or click to browse
-            </p>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Supports .zip folder, PDF, Word (.docx, .doc), text, and image scans
-            </p>
             <input
               type="file"
               multiple
-              accept=".zip,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,image/*"
-              className="hidden"
-              onChange={(e) => void handlers.onFiles(e.target.files)}
+              accept=".pdf,.docx,.zip"
+              className="sr-only"
+              onChange={(e) => handlers.onFiles(e.target.files)}
             />
+            <div className="rounded-full bg-primary/10 p-3 text-primary">
+              <Upload className="size-6" />
+            </div>
+            <p className="mt-3 text-sm font-semibold text-foreground">
+              Drop resumes or a <span className="text-primary font-bold">.ZIP archive</span> here, or browse
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Supports bulk PDF, DOCX and nested ZIP files. Text extraction runs entirely in your browser.
+            </p>
           </label>
 
-          <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
+          {/* Job Description (Target Role Match) Accordion Box */}
+          <div className="panel space-y-3 p-4 border border-border/80 bg-card/60">
             <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label
-                  htmlFor="jd-toggle"
-                  className="text-xs font-semibold text-foreground cursor-pointer"
-                >
-                  Match against a specific Job Description
+              <div className="flex items-center gap-2">
+                <Target className="size-4 text-primary" />
+                <Label htmlFor="jd-toggle" className="text-xs font-semibold text-foreground cursor-pointer">
+                  Match Against Target Job Description (JD)
                 </Label>
-                <p className="text-xs text-muted-foreground">
-                  {control.useJd
-                    ? "Acting as that company's hiring manager — blunt about fit."
-                    : "Off: assesses against the default role set in AI Engine."}
-                </p>
               </div>
-              <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
+              <Switch
+                id="jd-toggle"
+                checked={control.useJd}
+                onCheckedChange={control.setUseJd}
+              />
             </div>
 
             {control.useJd && (
-              <div className="space-y-2.5">
+              <div className="space-y-2 pt-1 animate-in fade-in slide-in-from-top-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Paste the hiring requirements or JD below. The engine will evaluate each candidate's exact fit, missing skills, and calculate a dedicated JD Match %.
+                </p>
                 <Textarea
                   value={control.jd}
                   onChange={(e) => control.setJd(e.target.value)}
-                  placeholder="Paste the full job description or key requirements here…"
-                  className="min-h-28 text-xs leading-relaxed rounded-lg"
+                  placeholder="Paste Job Description, core requirements, and required skills here..."
+                  rows={4}
+                  className="text-xs font-mono bg-background/50 resize-y"
                 />
-                {control.jd.trim() && items.length > 0 && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                {stats.done > 0 && control.jd.trim() && (
+                  <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] text-muted-foreground">
-                      Target JD ready:{" "}
-                      <span className="font-semibold text-foreground">
-                        {control.jd.trim().slice(0, 45)}...
-                      </span>
+                      JD updated? Re-evaluate previously analyzed resumes:
                     </span>
-                    {handlers.onReevaluateAllJd && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        className="h-7 text-xs font-semibold"
-                        onClick={handlers.onReevaluateAllJd}
-                        disabled={running}
-                      >
-                        <RefreshCw className="size-3 mr-1 text-primary" />
-                        Re-evaluate All ({items.length}) with this JD
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs font-semibold rounded-lg bg-primary/5 hover:bg-primary/10 border-primary/30 text-primary"
+                      onClick={handlers.onReevaluateAllJd}
+                    >
+                      <RefreshCw className="size-3 mr-1.5" />
+                      Re-evaluate All ({stats.done}) with JD
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1255,110 +1294,124 @@ function AnalyzeView({
           </div>
         </section>
 
-        <section className="panel flex flex-col justify-between overflow-hidden lg:col-span-5">
-          <div className="panel-header flex items-center justify-between border-b border-border">
-            <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground">Screening Engine</h2>
-            </div>
-            {running && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-warning">
-                <Loader2 className="size-3.5 animate-spin" /> Analyzing...
+        <section className="space-y-4 lg:col-span-5">
+          <div className="panel space-y-4 p-5">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="space-y-0.5">
+                <h2 className="text-sm font-bold text-foreground">Screening Engine</h2>
+                <p className="text-xs text-muted-foreground">
+                  {control.ruleBasedOnly ? "Zero AI · Instant ATS Parser" : `Using ${activeModel.label}`}
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                {control.ruleBasedOnly ? "100% Local / Free" : "Active Model"}
               </span>
-            )}
-          </div>
+            </div>
 
-          <div className="panel-body flex-1 space-y-5">
-            <div className="space-y-4">
+            {/* Rule-Based Mode Toggle */}
+            <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3">
+              <div className="space-y-0.5 pr-2">
+                <div className="flex items-center gap-1.5">
+                  <Zap className="size-3.5 text-primary fill-primary" />
+                  <Label htmlFor="rule-based-mode" className="text-xs font-bold text-foreground cursor-pointer">
+                    Rule-Based ATS Engine Only
+                  </Label>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Zero AI tokens & instant speed. Scores resumes deterministically using 5-category ATS rules without model calls.
+                </p>
+              </div>
+              <Switch
+                id="rule-based-mode"
+                checked={control.ruleBasedOnly}
+                onCheckedChange={control.setRuleBasedOnly}
+              />
+            </div>
+
+            {/* Screening Concurrency & Cooldown Tuning */}
+            <div className="space-y-3.5 rounded-xl border border-border/80 bg-secondary/20 p-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Worker Concurrency &amp; Cooldown</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {control.concurrency} worker{control.concurrency > 1 ? "s" : ""} · {control.cooldownSec}s delay
+                </span>
+              </div>
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground font-semibold">Parallel Concurrency</span>
-                  <span className="font-bold font-mono text-primary text-xs">
-                    {control.concurrency} concurrent worker{control.concurrency > 1 ? "s" : ""}
+                  <span className="text-muted-foreground">Parallel Concurrency</span>
+                  <span className="font-medium font-mono text-foreground">
+                    {control.concurrency} concurrent
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
+
+                {/* Quick Presets for Concurrency */}
+                <div className="flex flex-wrap items-center gap-1 pb-1">
                   <Button
                     type="button"
-                    variant={control.concurrency === 50 ? "default" : "outline"}
                     size="sm"
+                    variant={control.concurrency === 50 ? "default" : "outline"}
+                    className="h-5 px-1.5 text-[10px] rounded-md font-mono"
                     disabled={running}
                     onClick={() => {
                       control.setConcurrency(50);
                       control.setCooldownSec(0);
                     }}
-                    className="h-7 px-2 text-[11px] font-semibold"
                   >
-                    ⚡ 50 Turbo (Max)
+                    50 Turbo
                   </Button>
                   <Button
                     type="button"
-                    variant={control.concurrency === 25 ? "default" : "outline"}
                     size="sm"
+                    variant={control.concurrency === 25 ? "default" : "outline"}
+                    className="h-5 px-1.5 text-[10px] rounded-md font-mono"
                     disabled={running}
                     onClick={() => {
                       control.setConcurrency(25);
                       control.setCooldownSec(0);
                     }}
-                    className="h-7 px-2 text-[11px] font-semibold"
                   >
-                    🚀 25 Fast
+                    25 Fast
                   </Button>
                   <Button
                     type="button"
-                    variant={control.concurrency === 10 ? "default" : "outline"}
                     size="sm"
+                    variant={control.concurrency === 10 ? "default" : "outline"}
+                    className="h-5 px-1.5 text-[10px] rounded-md font-mono"
                     disabled={running}
                     onClick={() => {
                       control.setConcurrency(10);
                       control.setCooldownSec(1);
                     }}
-                    className="h-7 px-2 text-[11px] font-semibold"
                   >
-                    ⚡ 10 High
+                    10 Balanced
                   </Button>
                   <Button
                     type="button"
-                    variant={control.concurrency === 5 ? "default" : "outline"}
                     size="sm"
+                    variant={control.concurrency === 5 ? "default" : "outline"}
+                    className="h-5 px-1.5 text-[10px] rounded-md font-mono"
                     disabled={running}
                     onClick={() => {
                       control.setConcurrency(5);
                       control.setCooldownSec(1);
                     }}
-                    className="h-7 px-2 text-[11px] font-semibold"
                   >
-                    5 Standard
+                    5 Moderate
                   </Button>
-                  {![1, 5, 10, 25, 50].includes(activeModel.recommendedConcurrency) && (
-                    <Button
-                      type="button"
-                      variant={
-                        control.concurrency === activeModel.recommendedConcurrency
-                          ? "default"
-                          : "outline"
-                      }
-                      size="sm"
-                      disabled={running}
-                      onClick={() => {
-                        control.setConcurrency(activeModel.recommendedConcurrency);
-                        control.setCooldownSec(activeModel.recommendedCooldownSec);
-                      }}
-                      className="h-7 px-2 text-[11px] font-semibold border-primary/40 text-primary hover:bg-primary/10"
-                    >
-                      🎯 {activeModel.recommendedConcurrency} Recommended ({activeModel.provider.toUpperCase()})
-                    </Button>
-                  )}
                   <Button
                     type="button"
-                    variant={control.concurrency === 1 ? "default" : "outline"}
                     size="sm"
+                    variant={control.concurrency === 1 ? "default" : "outline"}
+                    className="h-5 px-1.5 text-[10px] rounded-md font-mono"
                     disabled={running}
                     onClick={() => {
                       control.setConcurrency(1);
-                      control.setCooldownSec(4);
+                      if (activeModel.recommendedCooldownSec !== undefined) {
+                        control.setCooldownSec(activeModel.recommendedCooldownSec);
+                      }
                     }}
-                    className="h-7 px-2 text-[11px] font-semibold"
                   >
                     1 Safe
                   </Button>
@@ -1377,15 +1430,51 @@ function AnalyzeView({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Request Cooldown</span>
+                  <span className="text-muted-foreground">Request Cooldown (Up to 2 min)</span>
                   <span className="font-medium font-mono text-foreground">
-                    {control.cooldownSec}s delay
+                    {control.cooldownSec === 0
+                      ? "0s (Instant)"
+                      : control.cooldownSec >= 60
+                      ? `${Math.floor(control.cooldownSec / 60)}m ${
+                          control.cooldownSec % 60 ? `${control.cooldownSec % 60}s` : ""
+                        } delay`
+                      : `${control.cooldownSec}s delay`}
                   </span>
                 </div>
+
+                {/* Quick Presets for Delay up to 2 min */}
+                <div className="flex flex-wrap items-center gap-1 pb-1">
+                  {[
+                    { label: "0s", val: 0 },
+                    { label: "3s", val: 3 },
+                    { label: "5s", val: 5 },
+                    { label: "10s", val: 10 },
+                    { label: "30s", val: 30 },
+                    { label: "1m", val: 60 },
+                    { label: "2m", val: 120 },
+                  ].map((p) => (
+                    <Button
+                      key={p.val}
+                      type="button"
+                      size="sm"
+                      variant={control.cooldownSec === p.val ? "default" : "outline"}
+                      className={`h-5 px-1.5 text-[10px] rounded-md font-mono ${
+                        control.cooldownSec === p.val
+                          ? "bg-primary text-primary-foreground font-bold"
+                          : "bg-card/70 text-muted-foreground hover:text-foreground"
+                      }`}
+                      disabled={running}
+                      onClick={() => control.setCooldownSec(p.val)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+
                 <Slider
                   value={[control.cooldownSec]}
                   min={0}
-                  max={30}
+                  max={120}
                   step={1}
                   disabled={running}
                   onValueChange={([v]) => control.setCooldownSec(v ?? 0)}
@@ -1568,6 +1657,8 @@ function AnalyzeView({
             rows={stats.doneRows}
             onOpen={handlers.onOpen}
             onExportPdf={handlers.onExportPdf}
+            onExportCsvSelected={handlers.onExportCsvSelected}
+            onExportMdSelected={handlers.onExportMdSelected}
             onDelete={handlers.onDelete}
             onDeleteMany={handlers.onDeleteMany}
             onReevaluate={handlers.onReevaluate}

@@ -5,7 +5,9 @@ import {
   Award,
   CheckCircle2,
   ChevronsUpDown,
+  Download,
   FileDown,
+  FileSpreadsheet,
   Filter,
   RefreshCw,
   Search,
@@ -58,6 +60,8 @@ export function MasterTable({
   rows,
   onOpen,
   onExportPdf,
+  onExportCsvSelected,
+  onExportMdSelected,
   onDelete,
   onDeleteMany,
   onReevaluate,
@@ -69,6 +73,8 @@ export function MasterTable({
   rows: MasterRow[];
   onOpen: (id: string) => void;
   onExportPdf: (id: string) => void;
+  onExportCsvSelected?: (rows: MasterRow[]) => void;
+  onExportMdSelected?: (rows: MasterRow[]) => void;
   onDelete?: ((id: string) => void) | undefined;
   onDeleteMany?: ((ids: string[]) => void) | undefined;
   onReevaluate?: ((id: string) => void) | undefined;
@@ -198,6 +204,20 @@ export function MasterTable({
       }
       return next;
     });
+  };
+
+  const selectedRows = useMemo(() => {
+    return rows.filter((r) => selectedIds.has(r.id));
+  }, [rows, selectedIds]);
+
+  const handleExportCsvSelected = () => {
+    if (selectedRows.length === 0) return;
+    onExportCsvSelected?.(selectedRows);
+  };
+
+  const handleExportMdSelected = () => {
+    if (selectedRows.length === 0) return;
+    onExportMdSelected?.(selectedRows);
   };
 
   const handleDeleteSelected = () => {
@@ -421,7 +441,31 @@ export function MasterTable({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {onExportCsvSelected && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                onClick={handleExportCsvSelected}
+              >
+                <FileSpreadsheet className="size-3 mr-1.5" />
+                Export CSV ({selectedIds.size})
+              </Button>
+            )}
+
+            {onExportMdSelected && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs font-semibold rounded-lg bg-card hover:bg-secondary border-border text-foreground"
+                onClick={handleExportMdSelected}
+              >
+                <Download className="size-3 mr-1.5 text-primary" />
+                Export MD ({selectedIds.size})
+              </Button>
+            )}
+
             {onReevaluateMany && (
               <Button
                 size="sm"

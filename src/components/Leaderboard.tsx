@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Download,
+  FileSpreadsheet,
   Filter,
   RefreshCw,
   Sliders,
@@ -16,6 +18,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -63,19 +66,27 @@ function rankMedal(rank: number) {
 export function Leaderboard({
   rows,
   onOpen,
+  onExportCsvSelected,
+  onExportMdSelected,
   onDelete,
+  onDeleteMany,
   onReevaluate,
+  onReevaluateMany,
   hasActiveJd,
   shortlistCutoff = 75,
   onShortlistCutoffChange,
 }: {
   rows: LeaderRow[];
   onOpen: (id: string) => void;
-  onDelete?: (id: string) => void;
-  onReevaluate?: (id: string) => void;
-  hasActiveJd?: boolean;
-  shortlistCutoff?: number;
-  onShortlistCutoffChange?: (val: number) => void;
+  onExportCsvSelected?: ((rows: LeaderRow[]) => void) | undefined;
+  onExportMdSelected?: ((rows: LeaderRow[]) => void) | undefined;
+  onDelete?: ((id: string) => void) | undefined;
+  onDeleteMany?: ((ids: string[]) => void) | undefined;
+  onReevaluate?: ((id: string) => void) | undefined;
+  onReevaluateMany?: ((ids: string[]) => void) | undefined;
+  hasActiveJd?: boolean | undefined;
+  shortlistCutoff?: number | undefined;
+  onShortlistCutoffChange?: ((val: number) => void) | undefined;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [asc, setAsc] = useState(false);
@@ -83,6 +94,7 @@ export function Leaderboard({
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [scoreFilter, setScoreFilter] = useState<ScoreCategoryId>("all");
   const [onlyShortlisted, setOnlyShortlisted] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const cutoff = shortlistCutoff ?? 75;
 
@@ -114,7 +126,7 @@ export function Leaderboard({
 
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = rows.filter((r) => {
+    let list = rows.filter((r) => {
       if (!r || !r.analysis) return false;
       const score = effectiveScore(r.analysis);
 
@@ -157,7 +169,8 @@ export function Leaderboard({
           (b.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length * 5),
       structure: (a, b) => (a.analysis.structure?.score ?? 0) - (b.analysis.structure?.score ?? 0),
     };
-    return [...list].sort((a, b) => cmp[sortKey](a, b) * dir);
+    list = [...list].sort((a, b) => cmp[sortKey](a, b) * dir);
+    return list;
   }, [rows, sortKey, asc, query, tierFilter]);
 
   const toggle = (key: SortKey) => {
@@ -166,6 +179,60 @@ export function Leaderboard({
       setSortKey(key);
       setAsc(key === "name");
     }
+  };
+
+  const allFilteredSelected =
+    sorted.length > 0 && sorted.every((row) => selectedIds.has(row.id));
+  const someFilteredSelected =
+    sorted.some((row) => selectedIds.has(row.id)) && !allFilteredSelected;
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sorted.map((r) => r.id)));
+    }
+  };
+
+  const toggleSelectRow = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const selectedRows = useMemo(() => {
+    return rows.filter((r) => selectedIds.has(r.id));
+  }, [rows, selectedIds]);
+
+  const handleExportCsvSelected = () => {
+    if (selectedRows.length === 0) return;
+    onExportCsvSelected?.(selectedRows);
+  };
+
+  const handleExportMdSelected = () => {
+    if (selectedRows.length === 0) return;
+    onExportMdSelected?.(selectedRows);
+  };
+
+  const handleDeleteSelected = () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    if (confirm(`Are you sure you want to delete ${count} selected candidate${count > 1 ? "s" : ""}?`)) {
+      onDeleteMany?.(Array.from(selectedIds));
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleReevaluateSelected = () => {
+    if (selectedIds.size === 0) return;
+    onReevaluateMany?.(Array.from(selectedIds));
   };
 
   const Th = ({
@@ -357,12 +424,94 @@ export function Leaderboard({
         </div>
       )}
 
+      {/* Floating / Inline Bulk Actions Bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs font-bold text-primary">
+              {selectedIds.size}
+            </span>
+            <span className="text-xs font-medium text-foreground">
+              candidate{selectedIds.size > 1 ? "s" : ""} selected
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onExportCsvSelected && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                onClick={handleExportCsvSelected}
+              >
+                <FileSpreadsheet className="size-3 mr-1.5" />
+                Export CSV ({selectedIds.size})
+              </Button>
+            )}
+
+            {onExportMdSelected && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs font-semibold rounded-lg bg-card hover:bg-secondary border-border text-foreground"
+                onClick={handleExportMdSelected}
+              >
+                <Download className="size-3 mr-1.5 text-primary" />
+                Export MD ({selectedIds.size})
+              </Button>
+            )}
+
+            {onReevaluateMany && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs font-semibold rounded-lg bg-card hover:bg-secondary border-primary/40 text-foreground"
+                onClick={handleReevaluateSelected}
+              >
+                <RefreshCw className="size-3 mr-1.5 text-primary" />
+                Re-evaluate {hasActiveJd ? "with Current JD" : "Selected"} ({selectedIds.size})
+              </Button>
+            )}
+
+            {onDeleteMany && (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 text-xs font-semibold rounded-lg"
+                onClick={handleDeleteSelected}
+              >
+                <Trash2 className="size-3 mr-1.5" />
+                Delete Selected ({selectedIds.size})
+              </Button>
+            )}
+
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+              onClick={() => setSelectedIds(new Set())}
+              title="Clear selection"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-secondary/40">
               <TableRow className="border-b border-border hover:bg-transparent">
-                <TableHead className="w-12 text-xs font-semibold text-muted-foreground">
+                <TableHead className="w-10 text-center">
+                  <Checkbox
+                    checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all candidates"
+                    className="translate-y-0.5"
+                  />
+                </TableHead>
+                <TableHead className="w-10 text-xs font-semibold text-muted-foreground">
                   #
                 </TableHead>
                 <Th k="name">Candidate &amp; Target Role</Th>
@@ -390,7 +539,7 @@ export function Leaderboard({
               {sorted.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={8}
+                    colSpan={9}
                     className="py-12 text-center text-xs text-muted-foreground"
                   >
                     No resumes match this filter.
@@ -401,18 +550,29 @@ export function Leaderboard({
                 const a = row.analysis;
                 const score = effectiveScore(a);
                 const isShortlisted = score >= cutoff;
+                const isSelected = selectedIds.has(row.id);
                 const totalIssues = (a.criticalIssues || []).length;
                 const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
                 return (
                   <TableRow
                     key={row.id}
                     className={`cursor-pointer transition-all ${
-                      isShortlisted
+                      isSelected
+                        ? "bg-primary/10 hover:bg-primary/15"
+                        : isShortlisted
                         ? "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10 hover:bg-emerald-500/15"
                         : "hover:bg-secondary/50"
                     }`}
                     onClick={() => onOpen(row.id)}
                   >
+                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleSelectRow(row.id)}
+                        aria-label={`Select candidate ${a.candidateName}`}
+                        className="translate-y-0.5"
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         {index < 3 ? (

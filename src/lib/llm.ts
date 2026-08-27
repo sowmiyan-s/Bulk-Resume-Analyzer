@@ -141,6 +141,7 @@ export function buildMessages(input: {
   jobDescription?: string;
   defaultRole?: string;
   companyName?: string;
+  atsFacts?: string;
 }): Array<{ role: "system" | "user"; content: string }> {
   const jd = input.jobDescription?.trim();
   const defaultRole = input.defaultRole?.trim() || "Software Engineer (Entry Level)";
@@ -161,6 +162,8 @@ EVALUATION MANDATE:
 - Benchmark the candidate's technical skills, project complexity, and engineering depth against this target role (${defaultRole}).
 - Calibrate score fairly across the 4 categories (Stack Depth, Project Architecture, Experience, ATS Structure). Set evaluation_basis to "role-fit".`;
 
+  const atsBlock = input.atsFacts ? `\n${input.atsFacts.trim()}\n` : "";
+
   return [
     { role: "system", content: SYSTEM_PROMPT },
     {
@@ -170,7 +173,7 @@ ${jdBlock}
 
 RESUME CONTENT & METRICS:
 ${capForPrompt(input.resumeText)}
-
+${atsBlock}
 ${SCHEMA_SPEC}
 
 ${RULES}`,
@@ -312,6 +315,7 @@ export async function callModel(
     jobDescription?: string;
     defaultRole?: string;
     companyName?: string;
+    atsFacts?: string;
   },
   settings: LlmSettings,
   signal?: AbortSignal,

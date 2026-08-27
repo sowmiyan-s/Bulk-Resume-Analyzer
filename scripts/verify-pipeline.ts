@@ -247,5 +247,98 @@ check(
     .score === 0,
 );
 
+console.log("\n=== 6. ATS ENGINE (Deterministic Parser & Rules) ===");
+import { runAtsEngine, atsFactSheet } from "../src/lib/ats-engine";
+import { buildMessages } from "../src/lib/llm";
+import { createRuleBasedAnalysis } from "../src/lib/analysis-types";
+
+const sampleResume = `
+Johnathan Doe
+Email: john.doe@example.com | Phone: +1 555-123-4567 | LinkedIn: linkedin.com/in/johndoe | GitHub: github.com/johndoe
+
+Summary
+Full-stack software engineer with 2+ years of experience in distributed systems and cloud applications.
+
+Technical Skills
+Languages: Python, TypeScript, Java, C++, Go, SQL
+Frameworks: React, Next.js, Node.js, FastAPI, Spring Boot, Tailwind
+Databases & Cloud: PostgreSQL, MongoDB, Redis, Docker, Kubernetes, AWS, Terraform, CI/CD, Git
+
+Experience
+Software Engineer Intern - Acme Corp (June 2023 - August 2024)
+- Architected and deployed microservices using FastAPI and Docker, reducing API latency by 35% across 2M daily requests.
+- Engineered real-time data streaming pipeline with Kafka and Redis, boosting throughput by 40%.
+- Automated CI/CD deployment pipelines using GitHub Actions, cutting release deployment cycle times from 45 mins to 8 mins.
+
+Projects
+Distributed Task Queue (github.com/johndoe/task-queue)
+- Designed an asynchronous distributed task processor in Go and PostgreSQL handling 50k concurrent jobs.
+- Implemented rate limiting and retry backoff algorithms, decreasing job failure rates by 28%.
+
+Education
+B.S. in Computer Science - State University (2020 - 2024)
+`;
+
+const sampleJd = `
+Looking for a Software Engineer with experience in Python, FastAPI, Docker, Kubernetes, PostgreSQL, AWS, and CI/CD pipelines.
+Experience with distributed systems and performance optimization required.
+`;
+
+const atsReportNoJd = runAtsEngine(sampleResume);
+check("ATS score computed (no JD)", atsReportNoJd.score > 70, `score=${atsReportNoJd.score}`);
+check("ATS jdScore is null without JD", atsReportNoJd.jdScore === null);
+check("All 5 categories present", atsReportNoJd.categories.length === 5);
+check("Email check passed", atsReportNoJd.categories[0]!.checks.some((c) => c.id === "email" && c.passed));
+check("Phone check passed", atsReportNoJd.categories[0]!.checks.some((c) => c.id === "phone" && c.passed));
+check("Recognized skills detected", atsReportNoJd.metrics.skillsFound.length >= 10);
+check("Quantified bullets detected", atsReportNoJd.metrics.quantifiedBullets >= 3);
+check("No hard blockers on clean resume", atsReportNoJd.blockers.length === 0);
+
+const atsReportWithJd = runAtsEngine(sampleResume, sampleJd);
+check("ATS jdScore computed with JD", atsReportWithJd.jdScore !== null && atsReportWithJd.jdScore >= 70, `jdScore=${atsReportWithJd.jdScore}`);
+check("Matched JD keywords found", atsReportWithJd.metrics.jdMatched.includes("python") && atsReportWithJd.metrics.jdMatched.includes("docker"));
+
+console.log("\n=== 7. ATS FACT SHEET & LLM MESSAGES ===");
+const factSheet = atsFactSheet(atsReportWithJd);
+check("Fact sheet generated", factSheet.includes("DETERMINISTIC ATS ENGINE RESULT"));
+check("Fact sheet has score", factSheet.includes(`real_ats_score=${atsReportWithJd.score}/100`));
+check("Fact sheet has metrics", factSheet.includes("metrics: words="));
+
+const messages = buildMessages({
+  fileName: "john_doe_resume.pdf",
+  resumeText: sampleResume,
+  jobDescription: sampleJd,
+  atsFacts: factSheet,
+});
+check("buildMessages includes ATS facts in user prompt", messages[1]!.content.includes("DETERMINISTIC ATS ENGINE RESULT"));
+check("buildMessages includes resume text", messages[1]!.content.includes("Distributed Task Queue"));
+
+console.log("\n=== 8. NORMALIZER ATS BLENDING & RULE-BASED ANALYSIS ===");
+const blendedAnalysis = normalizeAnalysis(
+  {
+    overall_score: 90,
+    jd_score: 50,
+  },
+  atsReportWithJd,
+);
+check("Analysis has ats report attached", blendedAnalysis.ats !== null);
+check("jdScore overridden with engine keyword match", blendedAnalysis.jdScore === atsReportWithJd.jdScore);
+check("overallScore blended 70/30 with engine score", blendedAnalysis.overallScore === Math.round(atsReportWithJd.score * 0.7 + 90 * 0.3));
+
+const ruleBased = createRuleBasedAnalysis(
+  atsReportWithJd,
+  "john_doe_resume.pdf",
+  sampleResume,
+  sampleJd,
+  "Software Engineer (Entry Level)",
+);
+check("Rule-based analysis candidateName inferred", ruleBased.candidateName.includes("Johnathan"));
+check("Rule-based score matches engine", ruleBased.overallScore === atsReportWithJd.score);
+check("Rule-based jdScore matches engine", ruleBased.jdScore === atsReportWithJd.jdScore);
+check("Rule-based scoreBreakdown has 5 rows", ruleBased.scoreBreakdown.length === 5);
+check("Rule-based skillMatrix populated", ruleBased.skillMatrix.matched.length > 5);
+check("Rule-based evaluationBasis is jd-fit", ruleBased.evaluationBasis === "jd-fit");
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====\n`);
 if (fail > 0) process.exit(1);
+
