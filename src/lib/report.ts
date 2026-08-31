@@ -41,7 +41,8 @@ export async function exportCsv(rows: ExportRow[], fileName = `placement-report-
       "Final Score (0-100)": score,
       "Readiness Tier": a.readinessTier,
       "Target Role": a.role || a.assumedRole,
-      "JD Match": `${typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)))}%`,
+      "Fit Score": `${typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)))}%`,
+      "Evaluation Standard": a.evaluationBasis === "jd-fit" ? "Custom JD" : "Global SDE Benchmark",
       "Recruiter 6-Sec Scan": a.recruiterFirstImpression || "—",
       "Placement Officer Verdict": a.hrVerdict || "—",
       "Verified Strengths": strengthsText || "None recorded",
@@ -101,19 +102,17 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     }
   };
 
-  const heading = (title: string) => {
-    ensure(36);
-    y += 10;
-    doc.setFillColor(241, 245, 249).roundedRect(M, y, BODY, 20, 3, 3, "F");
-    doc.setFillColor(tr, tg, tb).rect(M, y, 4, 20, "F");
-    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(30, 41, 59);
-    doc.text(title.toUpperCase(), M + 12, y + 14);
-    y += 28;
+  const heading = (title: string, needed = 28) => {
+    ensure(needed);
+    doc.setFillColor(241, 245, 249).rect(M, y, BODY, 18, "F");
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 23, 42);
+    doc.text(title.toUpperCase(), M + 8, y + 13);
+    y += 24;
   };
 
   const textBlock = (
     s: string,
-    size = 9.5,
+    size = 9,
     style: "normal" | "bold" | "italic" = "normal",
     color: [number, number, number] = [51, 65, 85],
     indent = 0,
@@ -172,7 +171,7 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     const basisText =
       a.evaluationBasis === "jd-fit"
         ? `JD-Aligned Assessment`
-        : `Role Benchmark: ${a.assumedRole || "Standard"}`;
+        : `Global SDE Standard Benchmark`;
     doc.setFillColor(30, 41, 59).roundedRect(M, 80, 190, 14, 3, 3, "F");
     doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(148, 163, 184);
     doc.text(basisText, M + 8, 90);
@@ -189,10 +188,17 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
   doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(148, 163, 184);
   doc.text("OUT OF 100", scoreBoxX + scoreBoxW / 2, 59, { align: "center" });
 
-  const jdMatchPct = typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
-  doc.setFillColor(tr, tg, tb).roundedRect(scoreBoxX + 10, 65, scoreBoxW - 20, 14, 3, 3, "F");
-  doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(255, 255, 255);
-  doc.text(`JD Match: ${jdMatchPct}%`, scoreBoxX + scoreBoxW / 2, 75, { align: "center" });
+  const isJd = a.evaluationBasis === "jd-fit";
+  const jdMatchPct =
+    typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
+  doc.setFillColor(tr, tg, tb).roundedRect(scoreBoxX + 6, 65, scoreBoxW - 12, 14, 3, 3, "F");
+  doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(255, 255, 255);
+  doc.text(
+    isJd ? `JD Match: ${jdMatchPct}%` : `SDE Fit: ${jdMatchPct}%`,
+    scoreBoxX + scoreBoxW / 2,
+    75,
+    { align: "center" },
+  );
 
   y = 120;
 

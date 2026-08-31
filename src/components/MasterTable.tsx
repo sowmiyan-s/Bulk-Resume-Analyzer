@@ -532,7 +532,7 @@ export function MasterTable({
                   Readiness / Status
                 </Th>
                 <Th k="jd" className="w-24 text-center">
-                  JD Match
+                  Fit / Match
                 </Th>
                 <Th k="issues" className="w-32">
                   Issues
@@ -557,8 +557,13 @@ export function MasterTable({
                 const a = row.analysis;
                 const score = effectiveScore(a);
                 const isShortlisted = score >= cutoff;
-                const totalIssues = (a.criticalIssues || []).length;
-                const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
+                const critIssuesCount = (a.criticalIssues || []).length;
+                const formattingCount = (a.formattingProblems || []).length;
+                const grammarCount = (a.grammarAndOcrErrors || []).length;
+                const totalIssues = critIssuesCount + formattingCount + grammarCount;
+                const critical =
+                  (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
+                  (a.ats?.blockers || []).length;
                 const isSelected = selectedIds.has(row.id);
 
                 return (
@@ -651,10 +656,21 @@ export function MasterTable({
                         </Badge>
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs font-medium">
+                    <TableCell className="text-xs font-medium text-center">
                       {(() => {
-                        const jdVal = typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
-                        return <span className="text-foreground font-semibold">{jdVal}%</span>;
+                        const isJd = a.evaluationBasis === "jd-fit";
+                        const jdVal =
+                          typeof a.jdScore === "number"
+                            ? a.jdScore
+                            : Math.max(0, Math.min(100, Math.round(score * 0.88)));
+                        return (
+                          <div className="flex flex-col items-center">
+                            <span className="text-foreground font-semibold font-mono">{jdVal}%</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {isJd ? "Custom JD" : "Global SDE"}
+                            </span>
+                          </div>
+                        );
                       })()}
                     </TableCell>
                     <TableCell>

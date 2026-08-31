@@ -20,6 +20,7 @@ import {
   Lightbulb,
   RefreshCw,
   Sparkles,
+  SpellCheck,
   Target,
   Trash2,
   TrendingUp,
@@ -41,6 +42,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { effectiveScore, tierTone, type Analysis, type Issue } from "@/lib/analysis-types";
+import type { GrammarIssue } from "@/lib/grammar-engine";
 import { runAtsEngine, type AtsReport } from "@/lib/ats-engine";
 import type { TextFix } from "@/lib/sanitize";
 import { ScoreRing } from "./ScoreRing";
@@ -70,7 +72,7 @@ type Props = {
   onReanalyzeWithJd?: (id: string) => void;
 };
 
-type NavSection = "overview" | "mistakes" | "skills" | "rewrites" | "projects" | "ats";
+type NavSection = "overview" | "mistakes" | "grammar" | "skills" | "rewrites" | "projects" | "ats";
 
 function sevTone(s: Issue["severity"]) {
   if (s === "critical") return "border-destructive/40 bg-destructive/10 text-destructive";
@@ -127,6 +129,8 @@ export function RectifyDrawer({
   const criticalCount = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
   const totalMissing = (a.skillMatrix?.missing || []).length;
   const totalRewrites = (a.bulletRewrites || []).length;
+  const grammarIssues: GrammarIssue[] = atsData.metrics?.grammarIssues ?? [];
+  const grammarCount = grammarIssues.length;
 
   const handleSave = () => {
     const parsed = manual.trim() === "" ? null : Number(manual);
@@ -179,13 +183,25 @@ export function RectifyDrawer({
     },
     {
       id: "skills" as NavSection,
-      label: "Skills & JD Matching",
+      label: a.evaluationBasis === "jd-fit" ? "Skills & JD Matching" : "Skills & SDE Core",
       icon: Layers,
       badge: totalMissing > 0 ? `${totalMissing} missing` : "100%",
       badgeColor:
         totalMissing > 0
           ? "bg-primary/15 text-primary border-primary/30"
           : "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
+    },
+    {
+      id: "grammar" as NavSection,
+      label: "Spelling & Grammar",
+      icon: SpellCheck,
+      badge: grammarCount > 0 ? `${grammarCount}` : "✓",
+      badgeColor:
+        grammarCount > 5
+          ? "bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30 font-bold"
+          : grammarCount > 0
+            ? "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+            : "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
     },
     {
       id: "rewrites" as NavSection,
@@ -237,7 +253,7 @@ export function RectifyDrawer({
                     variant="outline"
                     className="border-primary/40 bg-primary/10 text-primary text-xs font-bold px-2.5 py-0.5 rounded-full"
                   >
-                    🎯 {jdScoreVal}% JD Match
+                    {a.evaluationBasis === "jd-fit" ? `🎯 ${jdScoreVal}% JD Match` : `🌐 ${jdScoreVal}% Global SDE Fit`}
                   </Badge>
                 </div>
                 <SheetDescription className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2">
@@ -428,7 +444,9 @@ export function RectifyDrawer({
                       <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-xs leading-relaxed flex items-start gap-2.5">
                         <Zap className="size-4 text-primary shrink-0 mt-0.5" />
                         <div>
-                          <span className="font-bold text-foreground">Target JD Alignment: </span>
+                          <span className="font-bold text-foreground">
+                            {a.evaluationBasis === "jd-fit" ? "Target JD Alignment: " : "Global SDE Baseline Alignment: "}
+                          </span>
                           <span className="text-muted-foreground">{a.jdVerdict}</span>
                         </div>
                       </div>
@@ -621,6 +639,124 @@ export function RectifyDrawer({
                       )}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* SECTION: SPELLING & GRAMMAR AUDIT */}
+              {activeNav === "grammar" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                    <div>
+                      <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                        <SpellCheck className="size-4 text-primary" />
+                        Spelling &amp; Grammar Audit
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Every spelling mistake, grammar error, punctuation issue, and phrasing problem detected in the resume — with exact fixes.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={`text-xs font-mono font-bold ${grammarCount > 0 ? "text-rose-600 border-rose-500/40 bg-rose-500/10" : "text-emerald-600 border-emerald-500/40 bg-emerald-500/10"}`}>
+                      {grammarCount === 0 ? "✓ Clean" : `${grammarCount} Issues`}
+                    </Badge>
+                  </div>
+
+                  {grammarCount > 0 ? (
+                    <div className="space-y-4">
+                      {/* Summary Counts by Type */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {(["spelling", "grammar", "punctuation", "phrasing", "capitalization", "repetition"] as const)
+                          .map((type) => {
+                            const count = grammarIssues.filter((i) => i.type === type).length;
+                            if (count === 0) return null;
+                            const colors: Record<string, string> = {
+                              spelling: "text-rose-600 bg-rose-500/10 border-rose-500/30",
+                              grammar: "text-amber-600 bg-amber-500/10 border-amber-500/30",
+                              punctuation: "text-sky-600 bg-sky-500/10 border-sky-500/30",
+                              phrasing: "text-violet-600 bg-violet-500/10 border-violet-500/30",
+                              capitalization: "text-orange-600 bg-orange-500/10 border-orange-500/30",
+                              repetition: "text-slate-600 bg-slate-500/10 border-slate-500/30",
+                            };
+                            return (
+                              <div key={type} className={`rounded-lg border p-2.5 text-center ${colors[type] || ""}`}>
+                                <p className="text-xl font-bold font-mono">{count}</p>
+                                <p className="text-[10px] uppercase tracking-wider font-bold">{type}</p>
+                              </div>
+                            );
+                          })
+                          .filter(Boolean)}
+                      </div>
+
+                      {/* Individual Issues */}
+                      <div className="grid gap-2.5">
+                        {grammarIssues.map((issue, idx) => {
+                          const typeBadgeColor: Record<string, string> = {
+                            spelling: "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/30",
+                            grammar: "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30",
+                            punctuation: "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/30",
+                            phrasing: "bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30",
+                            capitalization: "bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30",
+                            repetition: "bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-500/30",
+                          };
+                          const sevColor =
+                            issue.severity === "critical"
+                              ? "border-l-rose-500"
+                              : issue.severity === "major"
+                                ? "border-l-amber-500"
+                                : "border-l-sky-400";
+                          return (
+                            <div
+                              key={idx}
+                              className={`rounded-xl border border-border bg-card p-3.5 space-y-2 border-l-4 ${sevColor} transition-all hover:shadow-xs`}
+                            >
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${typeBadgeColor[issue.type] || ""}`}>
+                                  {issue.type}
+                                </Badge>
+                                <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${
+                                  issue.severity === "critical" ? "bg-rose-500/20 text-rose-600 border-rose-500/40" :
+                                  issue.severity === "major" ? "bg-amber-500/20 text-amber-600 border-amber-500/40" :
+                                  "bg-muted text-muted-foreground border-border"
+                                }`}>
+                                  {issue.severity}
+                                </Badge>
+                                {issue.line && (
+                                  <span className="text-[10px] font-mono text-muted-foreground">Line {issue.line}</span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="font-mono bg-rose-500/10 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded border border-rose-500/20 line-through">
+                                  {issue.error}
+                                </span>
+                                <ArrowRight className="size-3 text-muted-foreground shrink-0" />
+                                <span className="font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20 font-semibold">
+                                  {issue.fix}
+                                </span>
+                              </div>
+
+                              <p className="text-[11px] text-muted-foreground">
+                                {issue.explanation}
+                              </p>
+
+                              {issue.context && (
+                                <div className="bg-background/80 p-2 rounded-lg border border-border/60 text-[11px] font-mono text-muted-foreground">
+                                  {issue.context}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-8 text-center space-y-2">
+                      <CheckCircle2 className="size-10 text-emerald-500 mx-auto" />
+                      <h4 className="text-sm font-bold text-foreground">Zero Spelling & Grammar Issues</h4>
+                      <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                        This resume has clean, professional language with no detectable spelling mistakes, grammar errors, or punctuation issues. Ready for Tier-1 company submissions (Microsoft, Amazon, Google, Stripe).
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

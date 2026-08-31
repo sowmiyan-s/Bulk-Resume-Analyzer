@@ -415,33 +415,22 @@ function Index() {
         }
       }
 
-      // 2. Start optimistic live progress timer for responsive real-time feedback
+      // 2. Responsive status notification with throttled timer to avoid UI lag
       const startTime = Date.now();
-      const phases = [
-        { progress: 35, msg: "Auditing skills & career history..." },
-        { progress: 55, msg: "Benchmarking ATS parseability & impact..." },
-        { progress: 75, msg: "Scoring candidate competencies..." },
-        { progress: 90, msg: "Finalizing recruiter verdict & rewrites..." },
-      ];
-
       patch(item.id, {
         status: "analyzing",
-        progress: 25,
-        message: attempt > 1 ? `AI analysis (attempt ${attempt})...` : phases[0]!.msg,
+        progress: 35,
+        message: attempt > 1 ? `AI analysis (attempt ${attempt})...` : "Auditing competencies & ATS match...",
         attempt,
       });
 
-      let phaseIdx = 0;
       const timer = setInterval(() => {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        const currentPhase = phases[phaseIdx] || phases[phases.length - 1]!;
-        if (phaseIdx < phases.length - 1) phaseIdx++;
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
         patch(item.id, {
-          status: "analyzing",
-          progress: currentPhase.progress,
-          message: `${currentPhase.msg} (${elapsed}s)`,
+          message: `Analyzing profile (${elapsed}s)...`,
+          progress: Math.min(85, 35 + elapsed * 8),
         });
-      }, 750);
+      }, 2500);
 
       const activeJd =
         overrideJd !== undefined
@@ -481,15 +470,7 @@ function Index() {
           signal,
         );
 
-        const normalized = normalizeAnalysis(raw2, atsReport);
-        // Blend overallScore: 70% ATS engine + 30% LLM audit
-        const blendedScore = Math.round(atsReport.score * 0.7 + normalized.overallScore * 0.3);
-        normalized.overallScore = Math.max(0, Math.min(100, blendedScore));
-        if (typeof atsReport.jdScore === "number") {
-          normalized.jdScore = atsReport.jdScore;
-        } else if (typeof normalized.jdScore !== "number") {
-          normalized.jdScore = Math.max(0, Math.min(100, Math.round(normalized.overallScore * 0.88)));
-        }
+        const normalized = normalizeAnalysis(raw2, atsReport, clean, item.file.name);
         normalized.ats = atsReport;
         return normalized;
       } catch (err: unknown) {

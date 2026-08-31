@@ -88,7 +88,7 @@ const SYSTEM_PROMPT =
 
 /** Compact key list for authentic section-by-section analysis without filler. */
 const SCHEMA_SPEC = `Keys (all required, all strings/arrays/objects as typed):
-candidate_name:string (from resume, else "Unnamed candidate")
+candidate_name:string (Extract candidate's actual person name from the resume header or file name, e.g. 'Sathwik Narayanan', 'R Sukesh', 'Reshma B')
 role:string (the target role inferred or specified)
 assumed_role:string (the role evaluated against)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
@@ -99,11 +99,11 @@ jd_match:{score:int 0-100,verdict:string} (required: calculate overall 0-100 per
 recruiter_first_impression:string (<=35 words: objective technical assessment based on demonstrated competencies)
 hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on verified skills)
 strengths:[string] max 3 (top technical competencies, e.g. 'Production backend with FastAPI & Docker', 'Multi-agent AI implementation')
-critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 1-4 items of real technical gaps, missing requirements, or anti-patterns (use "critical" for major red flags, "major" for important gaps, "minor" for small polish). Return [] only if resume has no issues.
-grammar_and_ocr_errors:[string] 0-2 items. ONLY genuine unreadable OCR glitches. Return [] if readable.
-formatting_problems:[string] 0-2 items. Genuine ATS blockers (e.g. 2 pages when 1 is appropriate for student, embedded photo, obsolete declaration). Return [] if clean.
+critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 1-5 concrete technical gaps, missing core sections, unquantified bullets, or ATS red flags. For any score below 80, you MUST provide explicit critical/major issues detailing what needs fixing. Return [] only if resume is 100% flawless.
+grammar_and_ocr_errors:[string] List all genuine grammatical errors, typos, spelling mistakes, repeated words, and punctuation errors. Format each as: '"<incorrect text>" -> "<corrected text>" (<brief explanation>)'. Return [] if clean.
+formatting_problems:[string] Genuine ATS blockers (e.g. multi-column layout artefacts, missing contact info, missing dates, excessive length). Return [] if clean.
 skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (List verified technical keywords)
-bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points with technical tools, architecture, and measurable outcomes.
+bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points with concrete technical tools, architecture, and realistic developer metrics (e.g. database indexing, JWT auth, latency reduction, unit tests, Docker). NEVER hallucinate fake enterprise revenue or fictional business metrics.
 tech_improvement_ideas:[string] max 4 (concrete tools/frameworks that would elevate their technical stack depth)
 project_suggestions:[string] max 2 (concrete engineering project ideas with clear architecture that solve their biggest skill gaps)
 structure:{score:int 0-100,label:string ("Excellent"|"Good"|"Needs work"|"Poor"),notes:[string] max 3}
@@ -114,13 +114,13 @@ section_improvements:[{section:string,current_gap:string,actionable_fix:string}]
 placement_tips:[string] 3-4 tactical interview & placement tips tailored specifically to this candidate's resume gaps`;
 
 const RULES = `Professional Evaluation & Scoring Standards:
-1. GRANULAR FULL-SPECTRUM SCORING (0-100 CONTINUOUS DISTRIBUTION):
+1. HIGH-BAR TIER-1 SDE SHORTLISTING (0-100 CONTINUOUS DISTRIBUTION):
    - Score candidates dynamically and realistically across the entire 0-100 spectrum based on the 6 sections. DO NOT default to clustered numbers (e.g. 92, 82, 72, 62) or multiples of 5/10. Use exact component points (e.g. 22/25, 21/25, 16/20, 8/10, 7/10, 8/10 -> 82).
-   - Calibrate across the standard evaluation categories:
-     * 90–100 (Exceptional): Production-level architecture, deep modern stack, verifiable internships/proof, clean ATS layout.
-     * 80–89 (High Match): Solid technical depth, full-stack or systems projects, relevant internships, clean format.
-     * 70–79 (Good / Polish): Solid foundation and functional projects, but lacks complex architecture or cloud deployment.
-     * 60–69 (Moderate): Basic tutorial-level projects, limited backend/systems depth, minor formatting gaps.
+   - Calibrate strictly across real-world hiring tiers:
+     * 90–100 (Tier-1 Shortlist / Top 5% Product Engineer): Production-level architecture (concurrency, caching, vector search, multi-tenant systems, or sandboxed execution), verifiable proof (published NPM/PyPI packages, patents, research papers, national hackathons, high LeetCode rating), clean Docker/cloud deployment, zero ATS flaws.
+     * 80–89 (High SDE Match): Solid engineering depth, full-stack or backend systems with robust database schemas, relevant internships, clean STAR-formatted bullets.
+     * 70–79 (Good / Needs Minor Polish): Functional projects and relevant tech stack, but lacks distributed scale, live user traction, or cloud containerization.
+     * 60–69 (Moderate / Junior Baseline): Basic tutorial-level projects (simple CRUD, standard clones), limited systems depth, minor formatting gaps.
      * 50–59 (Basic Foundation): Junior coursework foundation, superficial skills, missing project implementation.
      * 40–49 (Significant Gaps): Few relevant skills, missing core tools, no live projects or proof.
      * 30–39 (Low Fit): Minimal technical competency, vague bullet points, weak formatting.
@@ -128,12 +128,30 @@ const RULES = `Professional Evaluation & Scoring Standards:
      * 10–19 (Very Weak): Severe lack of basic technical knowledge, major ATS red flags.
      * Below 10 (<10): Blank, corrupted, or completely irrelevant resume.
 
-2. STRICT INTERNSHIP & JD RELEVANCE:
-   - When a Job Description is given, rigorously measure how the candidate's past internships, responsibilities, and projects directly align with the requirements of the JD.
+2. GLOBAL COMMON SDE REQUIREMENTS (WHEN NO JD IS SUPPLIED):
+   - When no specific Job Description is provided, evaluate the candidate against the universal industry standard Software Development Engineer (SDE) baseline:
+     * Core Programming Languages: Python, Java, C++, TypeScript, or JavaScript
+     * Computer Science Fundamentals: Data Structures & Algorithms, Object-Oriented Programming (OOP)
+     * Backend & Web: REST APIs, Databases (SQL/PostgreSQL/MySQL/MongoDB), Frameworks (React/Node/Express/Django/FastAPI/Spring)
+     * Developer Hygiene: Git, Linux, Docker, Unit Testing, and API Design
+   - Measure how effectively the candidate's projects demonstrate hands-on implementation of this universal SDE baseline.
+
+3. STRICT INTERNSHIP & JD RELEVANCE:
+   - When a custom Job Description is given, rigorously measure how the candidate's past internships, responsibilities, and projects directly align with the requirements of the JD.
    - Calculate an explicit jd_relevance_pct (0-100%) and provide a concise explanation of what overlaps and what is missing.
 
-3. NO DUMMY CRITIQUES & NO FILLER TEXT:
-   - Never manufacture imaginary typos, filler compliments, or fake flaws. Every critique must cite direct evidence from the resume text. Return [] if clean.`;
+4. REALISTIC BULLET REWRITES & NO FAKE ENTERPRISE METRICS:
+   - When rewriting bullets, elevate technical stack clarity, architectural design, database indexing, authentication, and realistic developer metrics (e.g. 'reduced latency by 35%', 'optimized queries for 1,000+ records', 'built 12 REST endpoints with 90% test coverage').
+   - NEVER hallucinate fake enterprise revenue ($2M) or fictional company scale on student projects.
+
+5. MANDATORY CRITICAL ISSUES FOR SCORES UNDER 80 & NO FLUFF:
+   - Resumes with scores < 80 or tagged with polish/overhaul requirements must never have empty critical issues.
+   - Keep all recruiter impressions and HR verdicts blunt, direct, and actionable without generic corporate buzzwords. Quote verbatim resume text when pointing out flaws.
+
+6. AUTHENTICITY, ANTI-FAKE METRICS & FAIR DOMAIN EVALUATION:
+   - Detect fabricated or ChatGPT-stuffed metrics (e.g. an unverified student project claiming '$5M ARR', '10M daily active users', or enterprise scale without company context or live proof).
+   - Reward genuine technical depth and proof-of-work: installable packages (PyPI, NPM), published research papers, patents, live demo URLs, GitHub repositories, and concrete system architecture.
+   - Fairly evaluate all engineering domains (Full-Stack, Backend, Frontend, Systems, AI/ML, Data Engineering, Embedded/IoT, CyberSec, Mobile). Never penalize honest technical builders who write authentic engineering details instead of inflated marketing buzzwords.`;
 
 export function buildMessages(input: {
   fileName: string;

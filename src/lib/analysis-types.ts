@@ -8,6 +8,7 @@
  */
 
 import type { AtsReport } from "./ats-engine";
+import { extractCandidateName } from "./sanitize";
 
 export type Severity = "critical" | "major" | "minor";
 
@@ -365,14 +366,11 @@ const pick = (o: Record<string, unknown>, ...keys: string[]): unknown => {
   return undefined;
 };
 
-function toTier(v: unknown, score: number): ReadinessTier {
+function toTier(v: unknown, score: number, hasHardBlockers = false): ReadinessTier {
+  if (hasHardBlockers || score < 65) return "Tier 3: Overhaul Required";
   const s = str(v).toLowerCase();
-  if (s.includes("tier 1") || s.includes("shortlist")) return "Tier 1: Shortlist Ready";
-  if (s.includes("tier 2") || s.includes("minor")) return "Tier 2: Needs Minor Polish";
-  if (s.includes("tier 3") || s.includes("overhaul")) return "Tier 3: Overhaul Required";
-  // Derive from the score when the model omitted or mangled the tier.
-  if (score >= 75) return "Tier 1: Shortlist Ready";
-  if (score >= 55) return "Tier 2: Needs Minor Polish";
+  if (s.includes("tier 1") || s.includes("shortlist") || score >= 80) return "Tier 1: Shortlist Ready";
+  if (s.includes("tier 2") || s.includes("polish") || (score >= 65 && score < 80)) return "Tier 2: Needs Minor Polish";
   return "Tier 3: Overhaul Required";
 }
 
@@ -615,7 +613,12 @@ function toSectionImprovements(v: unknown): SectionImprovement[] {
     .filter((s) => s.currentGap || s.actionableFix);
 }
 
-export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): Analysis {
+export function normalizeAnalysis(
+  raw: unknown,
+  atsReport?: AtsReport | null,
+  fallbackCleanText?: string,
+  fileName?: string,
+): Analysis {
   const o = (raw ?? {}) as Record<string, unknown>;
   const matrixRaw = (pick(o, "skill_matrix", "skillMatrix") ?? {}) as Record<string, unknown>;
   const jdRaw = (pick(o, "jd_match", "jdMatch") ?? {}) as Record<string, unknown>;
@@ -629,8 +632,6 @@ export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): A
   const breakdown = arr(pick(o, "score_breakdown", "scoreBreakdown")).map((r) => {
     const row = (r ?? {}) as Record<string, unknown>;
     const max = num(pick(row, "max", "outOf"), 100) || 100;
-    // Clamp to [0, max]: models occasionally return a score above the stated max,
-    // which would otherwise overflow the progress bars and the PDF chart.
     const score = Math.max(0, Math.min(max, num(pick(row, "score", "value"))));
     return {
       category: str(pick(row, "category", "name"), "Category"),
@@ -640,8 +641,6 @@ export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): A
     };
   });
 
-  // When a JD is supplied the framing is company-fit; otherwise we fall back to
-  // the role the model inferred (or the officer-supplied default role).
   const jdRawObj = (jdRaw ?? {}) as Record<string, unknown>;
   const hasJd =
     rawJdScore !== undefined ||
@@ -661,8 +660,10 @@ export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): A
           ? jdScoreNum
           : 0;
 
-  // If ATS engine report is attached, blend 70% engine / 30% LLM or take engine score
-  const overallScore = ats ? clamp(Math.round(ats.score * 0.7 + rawOverall * 0.3)) : rawOverall;
+  // Hybrid Shortlisting Score: 70% Holistic Engineering & Proof-of-Work (AI/Recruiter Evaluation) + 30% ATS Layout & Hygiene Parseability
+  const overallScore = ats
+    ? clamp(Math.round(rawOverall * 0.70 + ats.score * 0.30))
+    : rawOverall;
 
   const finalJdScore =
     ats?.jdScore !== null && ats?.jdScore !== undefined
@@ -690,7 +691,6 @@ export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): A
     breakdown,
   );
 
-  // If score breakdown was provided, keep it; otherwise synthesize from section audits
   const finalBreakdown: ScoreRow[] =
     breakdown.length > 0
       ? breakdown
@@ -742,24 +742,98 @@ export function normalizeAnalysis(raw: unknown, atsReport?: AtsReport | null): A
       pick(o, "missing_skills", "missingKeywords", "missing_critical_skills"),
   );
 
+  // Candidate Name extraction
+  const rawModelName = str(pick(o, "candidate_name", "candidateName", "name"), "");
+  const candidateName =
+    rawModelName &&
+    !rawModelName.toLowerCase().includes("unnamed") &&
+    rawModelName.length >= 2 &&
+    !/^(candidate|resume|cv|document|profile)$/i.test(rawModelName.trim())
+      ? rawModelName
+      : extractCandidateName(fallbackCleanText, fileName);
+
+  const rawIssues = toIssues(pick(o, "critical_issues", "criticalIssues", "issues"));
+  let criticalIssues = [...rawIssues];
+
+  // Synthesize concrete issues for any resume requiring overhaul / polish if issues array is empty
+  const hasHardBlockers = (ats?.blockers.length ?? 0) > 0;
+  const readinessTier = toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore, hasHardBlockers);
+
+  if (criticalIssues.length === 0 && (overallScore < 80 || hasHardBlockers)) {
+    // 1. Add ATS blockers
+    if (ats?.blockers.length) {
+      for (const b of ats.blockers) {
+        criticalIssues.push({
+          severity: "critical",
+          area: "ATS Hard Blocker",
+          problem: b,
+          evidence: "Deterministic ATS engine check",
+          fix: "Resolve layout or missing contact details to pass ATS screeners.",
+        });
+      }
+    }
+
+    // 2. Add missing sections
+    if (ats?.metrics.sectionsMissing.length) {
+      for (const s of ats.metrics.sectionsMissing) {
+        criticalIssues.push({
+          severity: s === "Projects" || s === "Experience / Internships" ? "critical" : "major",
+          area: "Missing Section",
+          problem: `Dedicated ${s} section is missing from the resume.`,
+          evidence: `Resume does not contain a recognizable '${s}' header`,
+          fix: `Add a structured '${s}' section with relevant bullet points.`,
+        });
+      }
+    }
+
+    // 3. Add unquantified bullet issue
+    if (ats && ats.metrics.bullets > 0 && ats.metrics.quantifiedBullets === 0) {
+      criticalIssues.push({
+        severity: "major",
+        area: "Quantified Impact",
+        problem: "No measurable outcomes (%, numbers, latency, scale) detected in bullet points.",
+        evidence: `${ats.metrics.bullets} bullet points found, 0 contain metrics.`,
+        fix: "Quantify achievements using STAR format (e.g. 'reduced latency by 40%', 'served 10k users').",
+      });
+    }
+
+    // 4. Add missing skills issue
+    if (missingSkills.length > 0) {
+      criticalIssues.push({
+        severity: "major",
+        area: "Technical Gaps",
+        problem: `Missing core role competencies: ${missingSkills.slice(0, 3).join(", ")}.`,
+        evidence: `Keywords not found in resume stack: ${missingSkills.slice(0, 3).join(", ")}`,
+        fix: `Incorporate verifiable project work and hands-on usage of ${missingSkills.slice(0, 2).join(" & ")}.`,
+      });
+    }
+  }
+
+  // Formatting & Grammar errors
+  const rawGrammar = strArr(pick(o, "grammar_and_ocr_errors", "grammarAndOcrErrors", "grammar_errors"));
+  const atsGrammar = ats?.metrics.grammarErrorsList ?? [];
+  const mergedGrammar = Array.from(new Set([...rawGrammar, ...atsGrammar])).slice(0, 10);
+
+  const rawFormatting = strArr(pick(o, "formatting_problems", "formattingProblems", "formatting_issues"));
+  const atsFormatting = (ats?.categories.find((c) => c.id === "format")?.checks ?? [])
+    .filter((k) => !k.passed)
+    .map((k) => k.detail);
+  const mergedFormatting = Array.from(new Set([...rawFormatting, ...atsFormatting])).slice(0, 8);
+
   return {
-    candidateName: str(pick(o, "candidate_name", "candidateName", "name"), "Unnamed candidate"),
+    candidateName,
     role: str(pick(o, "role", "target_role", "targetRole", "title"), "—"),
     overallScore,
-    readinessTier: toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore),
+    readinessTier,
     scoreBreakdown: finalBreakdown,
     hrVerdict: str(pick(o, "hr_verdict", "hrVerdict", "verdict", "summary")),
     recruiterFirstImpression: str(
       pick(o, "recruiter_first_impression", "recruiterFirstImpression", "first_impression"),
     ),
     strengths: strArr(pick(o, "strengths", "positives")),
-    criticalIssues: toIssues(pick(o, "critical_issues", "criticalIssues", "issues")),
-    grammarAndOcrErrors: strArr(
-      pick(o, "grammar_and_ocr_errors", "grammarAndOcrErrors", "grammar_errors"),
-    ),
-    formattingProblems: strArr(
-      pick(o, "formatting_problems", "formattingProblems", "formatting_issues"),
-    ),
+    criticalIssues,
+    grammarAndOcrErrors: mergedGrammar,
+    formattingProblems: mergedFormatting,
     skillMatrix: {
       matched: matchedSkills.length ? matchedSkills : sectionAudits.skills.matchedKeywords,
       missing: missingSkills.length ? missingSkills : sectionAudits.skills.missingCriticalSkills,
@@ -842,20 +916,13 @@ export function createRuleBasedAnalysis(
   activeJd?: string,
   defaultRole?: string,
 ): Analysis {
-  const lines = cleanText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const firstLine = lines[0] ?? "";
-  const inferredName =
-    firstLine && !firstLine.includes("@") && !/\d{4,}/.test(firstLine) && firstLine.length < 40
-      ? firstLine
-      : fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
+  const inferredName = extractCandidateName(cleanText, fileName);
 
   const role = activeJd ? "Target JD Role" : defaultRole || "Software Engineer (Entry Level)";
   const basis: "role-fit" | "jd-fit" = activeJd ? "jd-fit" : "role-fit";
   const overallScore = atsReport.score;
-  const readinessTier = toTier(undefined, overallScore);
+  const hasHardBlockers = atsReport.blockers.length > 0;
+  const readinessTier = toTier(undefined, overallScore, hasHardBlockers);
 
   const finalBreakdown: ScoreRow[] = atsReport.categories.map((c) => ({
     category: c.label,
@@ -871,9 +938,9 @@ export function createRuleBasedAnalysis(
   const recruiterFirstImpression =
     atsReport.score >= 80
       ? `Strong technical candidate profile with solid section structure, clean formatting, and clear competency indicators.`
-      : atsReport.score >= 60
+      : atsReport.score >= 65
         ? `Promising foundation with relevant skills, but requires further quantification and project architectural depth.`
-        : `Needs structural overhaul and enhanced technical clarity to reliably pass enterprise ATS filtering.`;
+        : `Requires structural overhaul and quantified outcomes to pass competitive screening filters.`;
 
   const hrVerdict = atsReport.blockers.length
     ? `Action required on ${atsReport.blockers.length} critical item(s): ${atsReport.blockers.join(" ")} Recommend candidate address these points before placement submission.`
@@ -895,6 +962,13 @@ export function createRuleBasedAnalysis(
       evidence: "Deterministic parser validation",
       fix: "Format resume content to clear this ATS blocker.",
     })),
+    ...atsReport.metrics.sectionsMissing.map((s) => ({
+      severity: (s === "Projects" || s === "Experience / Internships" ? "critical" : "major") as Severity,
+      area: "Missing Section",
+      problem: `Missing '${s}' section in resume.`,
+      evidence: `Section header '${s}' not detected`,
+      fix: `Add a dedicated '${s}' section with clear technical achievements.`,
+    })),
     ...atsReport.categories
       .flatMap((c) => c.checks)
       .filter((k) => !k.passed)
@@ -908,15 +982,11 @@ export function createRuleBasedAnalysis(
       })),
   ];
 
-  const formatCat = atsReport.categories.find((c) => c.id === "format");
-  const grammarAndOcrErrors =
-    formatCat?.checks
-      .filter((k) => !k.passed && (k.id === "glyphs" || k.id === "tables"))
-      .map((k) => k.detail) ?? [];
-  const formattingProblems =
-    formatCat?.checks
-      .filter((k) => !k.passed && (k.id === "length" || k.id === "bulletlen"))
-      .map((k) => k.detail) ?? [];
+  const grammarAndOcrErrors = atsReport.metrics.grammarErrorsList ?? [];
+  const formattingProblems = atsReport.categories
+    .find((c) => c.id === "format")
+    ?.checks.filter((k) => !k.passed && k.id !== "grammar")
+    .map((k) => k.detail) ?? [];
 
   const structCat = atsReport.categories.find((c) => c.id === "structure");
   const structScore = structCat ? clamp(Math.round((structCat.score / structCat.max) * 100)) : 75;

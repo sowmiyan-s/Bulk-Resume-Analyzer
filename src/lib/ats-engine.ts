@@ -17,6 +17,7 @@ import {
   type RoleArc,
   type ToolTaxonomyResult,
 } from "./role-taxonomy";
+import { analyzeGrammar, type GrammarIssue } from "./grammar-engine";
 
 export type AtsCheck = {
   id: string;
@@ -57,6 +58,9 @@ export type AtsReport = {
     jdMatched: string[];
     jdMissing: string[];
     readabilityWordsPerBullet: number;
+    /** Grammar, spelling, and typo issues detected */
+    grammarIssues: GrammarIssue[];
+    grammarErrorsList: string[];
     /** High-level role arc detected from the resume text. */
     roleArc: RoleArc;
     /** GenAI / domestic-AI tool taxonomy detected from the resume text. */
@@ -70,58 +74,34 @@ export type AtsReport = {
 /* ------------------------------- vocab ------------------------------- */
 
 const ACTION_VERBS = [
-  "achieved",
-  "architected",
-  "automated",
-  "built",
-  "boosted",
-  "created",
-  "cut",
-  "delivered",
-  "deployed",
-  "designed",
-  "developed",
-  "drove",
-  "engineered",
-  "enhanced",
-  "implemented",
-  "improved",
-  "increased",
-  "integrated",
-  "launched",
-  "led",
-  "managed",
-  "migrated",
-  "optimized",
-  "orchestrated",
-  "reduced",
-  "refactored",
-  "resolved",
-  "scaled",
-  "shipped",
-  "spearheaded",
-  "streamlined",
-  "tested",
-  "trained",
-  "analyzed",
-  "authored",
-  "configured",
-  "coordinated",
-  "debugged",
-  "documented",
-  "maintained",
-  "modernized",
-  "monitored",
-  "negotiated",
-  "presented",
-  "prototyped",
-  "published",
-  "researched",
-  "secured",
-  "simplified",
-  "supported",
-  "transformed",
-  "validated",
+  "accelerated", "accomplished", "achieved", "adapted", "administered", "analyzed", "appended", "applied",
+  "architected", "audited", "authored", "automated", "benchmarked", "boosted", "built", "calculated",
+  "centralized", "championed", "compiled", "composed", "computed", "conceptualized", "conducted", "configured",
+  "consolidated", "constructed", "containerized", "converted", "coordinated", "created", "customized", "cut",
+  "debugged", "decreased", "defined", "delegated", "delivered", "demonstrated", "deployed", "designed",
+  "developed", "devised", "diagnosed", "directed", "discovered", "dispatched", "distributed", "documented",
+  "doubled", "drafted", "drove", "eliminated", "embedded", "enabled", "engineered", "enhanced",
+  "established", "evaluated", "exceeded", "executed", "expanded", "expedited", "extracted", "fabricated",
+  "facilitated", "fine-tuned", "formulated", "founded", "generated", "guided", "handled", "headed",
+  "identified", "implemented", "improved", "incorporated", "increased", "indexed", "initiated", "innovated",
+  "inspected", "installed", "instituted", "integrated", "interfaced", "introduced", "invented", "investigated",
+  "launched", "lead", "led", "leveraged", "maintained", "managed", "mapped", "marshaled",
+  "maximized", "measured", "mentored", "migrated", "minimized", "modeled", "modernized", "modified",
+  "monitored", "motivated", "navigated", "negotiated", "obtained", "operated", "optimized", "orchestrated",
+  "organized", "originated", "overhauled", "oversaw", "packaged", "partnered", "performed", "pioneered",
+  "planned", "positioned", "prepared", "presented", "prevented", "prioritized", "processed", "produced",
+  "programmed", "projected", "promoted", "proposed", "protected", "prototyped", "provided", "published",
+  "queried", "raised", "reached", "realized", "rebuilt", "received", "recommended", "reconciled",
+  "recorded", "recruited", "redesigned", "reduced", "refactored", "refined", "regulated", "reinforced",
+  "remodeled", "rendered", "reorganized", "replaced", "reported", "represented", "researched", "resolved",
+  "restructured", "retrieved", "revamped", "reviewed", "revised", "revitalized", "routed", "saved",
+  "scaled", "scheduled", "screened", "scripted", "scrutinized", "secured", "selected", "served",
+  "shaped", "shared", "shipped", "simplified", "simulated", "slashed", "solicited", "solved",
+  "spearheaded", "specialized", "specified", "standardized", "started", "steered", "streamlined", "strengthened",
+  "structured", "succeeded", "summarized", "supervised", "supplied", "supported", "surpassed", "synthesized",
+  "systematized", "targeted", "taught", "tested", "tracked", "trained", "transcribed", "transformed",
+  "translated", "transmitted", "tripled", "troubleshot", "unified", "unlocked", "upgraded", "utilized",
+  "validated", "verified", "visualized", "won", "wrote",
 ];
 
 const WEAK_PHRASES = [
@@ -144,124 +124,31 @@ const WEAK_PHRASES = [
 ];
 
 const SKILL_TAXONOMY = [
-  "python",
-  "java",
-  "javascript",
-  "typescript",
-  "c++",
-  "c#",
-  "golang",
-  "go",
-  "rust",
-  "kotlin",
-  "swift",
-  "php",
-  "ruby",
-  "scala",
-  "r",
-  "matlab",
-  "sql",
-  "nosql",
-  "react",
-  "next.js",
-  "angular",
-  "vue",
-  "svelte",
-  "node.js",
-  "node",
-  "express",
-  "django",
-  "flask",
-  "fastapi",
-  "spring",
-  "spring boot",
-  ".net",
-  "laravel",
-  "rails",
-  "html",
-  "css",
-  "tailwind",
-  "bootstrap",
-  "sass",
-  "redux",
-  "graphql",
-  "rest",
-  "grpc",
-  "websocket",
-  "postgresql",
-  "postgres",
-  "mysql",
-  "mongodb",
-  "redis",
-  "sqlite",
-  "oracle",
-  "cassandra",
-  "dynamodb",
-  "elasticsearch",
-  "snowflake",
-  "bigquery",
-  "aws",
-  "azure",
-  "gcp",
-  "google cloud",
-  "docker",
-  "kubernetes",
-  "terraform",
-  "ansible",
-  "jenkins",
-  "github actions",
-  "gitlab ci",
-  "ci/cd",
-  "linux",
-  "bash",
-  "nginx",
-  "git",
-  "jira",
-  "figma",
-  "postman",
-  "selenium",
-  "pytest",
-  "junit",
-  "cypress",
-  "jest",
-  "pandas",
-  "numpy",
-  "scikit-learn",
-  "tensorflow",
-  "pytorch",
-  "keras",
-  "opencv",
-  "nlp",
-  "llm",
-  "langchain",
-  "hugging face",
-  "spark",
-  "hadoop",
-  "kafka",
-  "airflow",
-  "tableau",
-  "power bi",
-  "excel",
-  "looker",
-  "dbt",
-  "machine learning",
-  "deep learning",
-  "data analysis",
-  "data engineering",
-  "microservices",
-  "system design",
-  "oop",
-  "data structures",
-  "algorithms",
-  "agile",
-  "scrum",
-  "unit testing",
-  "tdd",
-  "api design",
-  "cloud architecture",
-  "devops",
-  "cybersecurity",
-  "penetration testing",
+  // Programming Languages
+  "python", "java", "javascript", "typescript", "c++", "c#", "golang", "go", "rust", "kotlin",
+  "swift", "dart", "php", "ruby", "scala", "r", "matlab", "solidity", "bash", "shell", "powershell", "sql", "c",
+  // Frontend & Mobile
+  "react", "react native", "next.js", "angular", "vue", "nuxt", "svelte", "sveltekit", "flutter",
+  "ios", "android", "html", "html5", "css", "css3", "tailwind", "bootstrap", "sass", "redux", "zustand", "vite", "webpack",
+  // Backend, Frameworks & Protocols
+  "node.js", "node", "express", "django", "flask", "fastapi", "spring", "spring boot", ".net", "asp.net",
+  "nest.js", "laravel", "rails", "graphql", "rest", "restful", "grpc", "websocket", "websockets", "trpc",
+  "microservices", "system design", "api design", "oop", "data structures", "algorithms",
+  // Databases & Vector Stores
+  "postgresql", "postgres", "mysql", "mongodb", "redis", "sqlite", "oracle", "cassandra", "dynamodb",
+  "elasticsearch", "snowflake", "bigquery", "faiss", "chromadb", "pinecone", "qdrant", "weaviate", "supabase", "firebase",
+  // Cloud, DevOps & Infrastructure
+  "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "terraform", "ansible", "helm",
+  "jenkins", "github actions", "gitlab ci", "ci/cd", "linux", "nginx", "git", "github", "gitlab",
+  "prometheus", "grafana", "devops", "cloud architecture",
+  // AI, ML & Data Engineering
+  "machine learning", "deep learning", "data analysis", "data engineering", "nlp", "computer vision",
+  "llm", "llms", "rag", "langchain", "llamaindex", "crewai", "autogen", "mcp", "hugging face",
+  "vllm", "ollama", "fine-tuning", "pytorch", "tensorflow", "keras", "scikit-learn", "opencv",
+  "pandas", "numpy", "polars", "pyarrow", "spark", "hadoop", "kafka", "airflow", "tableau", "power bi", "dbt",
+  // Testing, QA & Security
+  "jest", "pytest", "junit", "cypress", "playwright", "selenium", "postman", "unit testing", "tdd",
+  "cybersecurity", "penetration testing", "agile", "scrum", "jira", "figma",
 ];
 
 const SECTION_PATTERNS: Array<{ id: string; label: string; re: RegExp; required: boolean }> = [
@@ -482,9 +369,16 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
 
   const quantifiedBullets = bullets.filter((b) => QUANT_RE.test(b)).length;
   const actionVerbBullets = bullets.filter((b) => {
-    const first = lc(b.split(/\s+/)[0] ?? "");
-    return ACTION_VERBS.includes(first.replace(/[^a-z]/g, ""));
+    const firstFew = lc(b)
+      .replace(/[^a-z\s]/g, " ")
+      .split(/\s+/)
+      .slice(0, 3);
+    return firstFew.some((w) => ACTION_VERBS.includes(w));
   }).length;
+  const hasProofOfWork =
+    /(npm install|pip install|pypi\.org|npmjs\.com|patent|research paper|ijcrt|ieee|springer|published in|hackathon|leetcode|codeforces|kaggle|1st prize|2nd prize|3rd prize)/i.test(
+      text,
+    );
   const longestBulletWords = bullets.reduce((m, b) => Math.max(m, b.split(/\s+/).length), 0);
   const readabilityWordsPerBullet = bullets.length
     ? Math.round((bullets.reduce((s, b) => s + b.split(/\s+/).length, 0) / bullets.length) * 10) /
@@ -609,22 +503,31 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   const verbRatio = bullets.length ? actionVerbBullets / bullets.length : 0;
   const weakHits = containsAny(text, WEAK_PHRASES);
   const firstPerson = (text.match(/\b(I|my|me)\b/g) ?? []).length;
+  const quantScore = Math.min(
+    10,
+    Math.max(
+      quantRatio * 20,
+      Math.min(10, (quantifiedBullets >= 2 ? 6 : quantifiedBullets * 3) + (hasProofOfWork ? 4 : 0)),
+    ),
+  );
   const impact: AtsCheck[] = [
     check(
       "bullets",
       "Uses bullet points",
-      bullets.length >= 8,
+      bullets.length >= 6,
       Math.min(5, bullets.length * 0.5),
       5,
       `${bullets.length} bullet points detected.`,
     ),
     check(
       "quantified",
-      "Quantified achievements (numbers, %, scale)",
-      quantRatio >= 0.4,
-      Math.min(10, quantRatio * 20),
+      "Quantified achievements & verifiable proof",
+      quantRatio >= 0.35 || (quantifiedBullets >= 2 && hasProofOfWork),
+      quantScore,
       10,
-      `${quantifiedBullets}/${bullets.length || 0} bullets contain measurable outcomes.`,
+      hasProofOfWork
+        ? `${quantifiedBullets}/${bullets.length || 0} bullets with metrics + verifiable published artifacts/proof.`
+        : `${quantifiedBullets}/${bullets.length || 0} bullets contain measurable outcomes.`,
     ),
     check(
       "verbs",
@@ -632,7 +535,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       verbRatio >= 0.5,
       Math.min(6, verbRatio * 10),
       6,
-      `${actionVerbBullets}/${bullets.length || 0} bullets open with an action verb.`,
+      `${actionVerbBullets}/${bullets.length || 0} bullets open with action verbs.`,
     ),
     check(
       "weak",
@@ -654,24 +557,34 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     ),
   ];
 
-  /* --- 4. Skills & keyword density (20) --- */
-  const skillDensity = words ? skillsFound.length / (words / 100) : 0;
+  /* --- 4. Skills & architecture depth (20) --- */
+  const highBarSignals = containsAny(text, [
+    "distributed systems", "concurrency", "multithreading", "event-driven", "microservices",
+    "kafka", "rabbitmq", "redis", "caching", "database indexing", "sharding", "connection pooling",
+    "rate limiting", "jwt", "oauth", "sandboxed", "docker", "kubernetes", "grpc", "websockets",
+    "ci/cd", "unit testing", "system design", "memory optimization", "p2p", "local embeddings",
+    "rag", "vector search", "faiss", "multi-agent", "mcp", "leetcode", "codeforces", "hackathon",
+    "patent", "research paper", "pypi", "npm package", "open source",
+  ]);
+
   const skillChecks: AtsCheck[] = [
     check(
       "skill-count",
       "Recognised technical keywords",
-      skillsFound.length >= 12,
-      Math.min(10, skillsFound.length * 0.7),
-      10,
-      `${skillsFound.length} known skills matched: ${skillsFound.slice(0, 12).join(", ")}${skillsFound.length > 12 ? "…" : ""}`,
+      skillsFound.length >= 10,
+      Math.min(8, skillsFound.length * 0.6),
+      8,
+      `${skillsFound.length} known skills matched: ${skillsFound.slice(0, 10).join(", ")}${skillsFound.length > 10 ? "…" : ""}`,
     ),
     check(
-      "skill-spread",
-      "Skills used in context, not just listed",
-      skillDensity >= 1.2,
-      Math.min(6, skillDensity * 4),
+      "architecture-depth",
+      "Production architecture & Tier-1 SDE signals",
+      highBarSignals.length >= 2,
+      Math.min(6, Math.max(2, highBarSignals.length * 1.5)),
       6,
-      `Keyword density ${skillDensity.toFixed(2)} per 100 words.`,
+      highBarSignals.length > 0
+        ? `${highBarSignals.length} production architecture signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
+        : "No production architecture signals (Docker, Redis, microservices, concurrency, or packages) found.",
     ),
     check(
       "tooling",
@@ -689,9 +602,10 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         "jest",
         "junit",
         "terraform",
+        "git",
       ]).length > 0,
       Math.min(
-        4,
+        6,
         containsAny(text, [
           "aws",
           "azure",
@@ -705,14 +619,16 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
           "jest",
           "junit",
           "terraform",
+          "git",
         ]).length * 1.5,
       ),
-      4,
+      6,
       "Modern engineering tooling signals reliability to screeners.",
     ),
   ];
 
   /* --- 5. Length & formatting hygiene (15) --- */
+  const grammarAnalysis = analyzeGrammar(text);
   const tooLong = longestBulletWords > 45;
   const hasTableChars = /\|\s*\S+\s*\|/.test(text);
   const specialGlyphs = (text.match(/[^\x00-\x7F\u2018\u2019\u201c\u201d\u2013\u2014•₹]/g) ?? [])
@@ -724,27 +640,27 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       "Appropriate length (roughly 1 page / 300-900 words)",
       lengthOk,
       lengthOk
-        ? 6
+        ? 5
         : words < 300
-          ? Math.max(0, (words / 300) * 6)
-          : Math.max(0, 6 - ((words - 900) / 300) * 3),
-      6,
+          ? Math.max(0, (words / 300) * 5)
+          : Math.max(0, 5 - ((words - 900) / 300) * 3),
+      5,
       `${words} words ≈ ${estimatedPages} page(s).`,
     ),
     check(
       "bulletlen",
       "Bullets stay scannable (< 45 words)",
       !tooLong,
-      tooLong ? 1 : 4,
-      4,
+      tooLong ? 1 : 3,
+      3,
       `Longest bullet is ${longestBulletWords} words; average ${readabilityWordsPerBullet}.`,
     ),
     check(
       "tables",
       "No tables / multi-column layout artefacts",
       !hasTableChars,
-      hasTableChars ? 0 : 3,
-      3,
+      hasTableChars ? 0 : 2,
+      2,
       hasTableChars
         ? "Table pipes detected — columns often scramble in ATS parsers."
         : "No table or column artefacts.",
@@ -759,11 +675,23 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         ? "Character encoding is clean."
         : `${specialGlyphs} unusual glyphs — likely OCR noise.`,
     ),
+    check(
+      "grammar",
+      "Grammar, spelling & phrasing hygiene",
+      grammarAnalysis.issues.length === 0,
+      Math.max(0, 3 - grammarAnalysis.scorePenalty * 0.3),
+      3,
+      grammarAnalysis.issues.length === 0
+        ? "Grammar and spelling are clean."
+        : `${grammarAnalysis.issues.length} grammar/typo issue(s) detected: ${grammarAnalysis.formattedList.slice(0, 2).join("; ")}`,
+    ),
   ];
   if (hasTableChars)
     blockers.push("Table/column layout detected — reformat to a single-column flow.");
   if (tooLong)
     blockers.push(`A ${longestBulletWords}-word bullet will be skimmed past by recruiters.`);
+  if (grammarAnalysis.issues.length >= 6)
+    blockers.push(`High number of grammar & spelling errors (${grammarAnalysis.issues.length} detected) will trigger recruiter rejection.`);
 
   const categories: AtsCategory[] = [
     cat("parse", "ATS Parseability & Contact", parse, 20),
@@ -775,17 +703,18 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
 
   let score = Math.round(categories.reduce((s, c) => s + c.score, 0));
 
-  /* --- JD keyword match (deterministic) --- */
+  /* --- JD / Global SDE Core keyword match (deterministic) --- */
   let jdScore: number | null = null;
   let kws: string[] = [];
   let matched: string[] = [];
   let missing: string[] = [];
-  if (jobDescription && jobDescription.trim().length >= 5) {
-    kws = jdKeywords(jobDescription);
+  const hasCustomJd = Boolean(jobDescription && jobDescription.trim().length >= 5);
+
+  if (hasCustomJd) {
+    kws = jdKeywords(jobDescription!);
     matched = kws.filter((k) => containsAny(text, [k]).length > 0);
     missing = kws.filter((k) => !matched.includes(k));
     jdScore = kws.length ? Math.round((matched.length / kws.length) * 100) : null;
-    // JD alignment moves the real ATS score, as a live ATS would.
     if (jdScore !== null) {
       score = Math.round(score * 0.7 + jdScore * 0.3);
       if (jdScore < 35) {
@@ -793,12 +722,39 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       }
     }
   } else {
-    // If no custom JD is provided, compute baseline role/skill alignment score (0 - 100)
-    const skillsCategory = categories.find((c) => c.id === "skills");
-    const skillScore = skillsCategory ? skillsCategory.score : 15;
-    const skillPct = Math.round((skillScore / 20) * 100);
-    const countPct = Math.min(100, Math.round((skillsFound.length / 8) * 100));
-    jdScore = Math.max(0, Math.min(100, Math.round(skillPct * 0.7 + countPct * 0.3)));
+    // Global common baseline requirements for Software Development Engineer (SDE)
+    const GLOBAL_SDE_REQUIREMENTS = [
+      "python",
+      "java",
+      "javascript",
+      "typescript",
+      "c++",
+      "data structures",
+      "algorithms",
+      "oop",
+      "sql",
+      "postgresql",
+      "mysql",
+      "mongodb",
+      "react",
+      "node.js",
+      "express",
+      "django",
+      "fastapi",
+      "rest",
+      "api design",
+      "git",
+      "linux",
+      "docker",
+      "ci/cd",
+      "unit testing",
+      "system design",
+    ];
+    kws = GLOBAL_SDE_REQUIREMENTS;
+    matched = kws.filter((k) => containsAny(text, [k]).length > 0);
+    missing = kws.filter((k) => !matched.includes(k));
+    // SDE benchmark: matching 8-10 core competencies represents solid entry/mid SDE benchmark
+    jdScore = Math.min(100, Math.max(10, Math.round((matched.length / 8) * 100)));
   }
 
   const roleArc = classifyRoleArc(text);
@@ -822,6 +778,8 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       jdMatched: matched,
       jdMissing: missing.slice(0, 20),
       readabilityWordsPerBullet,
+      grammarIssues: grammarAnalysis.issues,
+      grammarErrorsList: grammarAnalysis.formattedList,
       roleArc: roleArc.arc,
       toolTaxonomy,
     },

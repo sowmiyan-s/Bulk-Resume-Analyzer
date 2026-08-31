@@ -529,11 +529,11 @@ export function Leaderboard({
                 <Th k="structure" className="w-24 text-center">
                   Structure
                 </Th>
-                <Th k="jd" className="w-20 text-center">
-                  JD Fit
+                <Th k="jd" className="w-24 text-center">
+                  Fit / Match
                 </Th>
                 <Th k="issues" className="w-24">
-                  Critical
+                  Issues
                 </Th>
                 <TableHead className="w-28 text-right text-xs font-semibold text-muted-foreground pr-4">
                   Actions
@@ -556,8 +556,13 @@ export function Leaderboard({
                 const score = effectiveScore(a);
                 const isShortlisted = score >= cutoff;
                 const isSelected = selectedIds.has(row.id);
-                const totalIssues = (a.criticalIssues || []).length;
-                const critical = (a.criticalIssues || []).filter((i) => i.severity === "critical").length;
+                const critIssuesCount = (a.criticalIssues || []).length;
+                const formattingCount = (a.formattingProblems || []).length;
+                const grammarCount = (a.grammarAndOcrErrors || []).length;
+                const totalIssues = critIssuesCount + formattingCount + grammarCount;
+                const critical =
+                  (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
+                  (a.ats?.blockers || []).length;
                 return (
                   <TableRow
                     key={row.id}
@@ -665,10 +670,21 @@ export function Leaderboard({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs font-medium">
+                    <TableCell className="text-xs font-medium text-center">
                       {(() => {
-                        const jdVal = typeof a.jdScore === "number" ? a.jdScore : Math.max(0, Math.min(100, Math.round(score * 0.88)));
-                        return <span className="text-foreground font-semibold">{jdVal}%</span>;
+                        const isJd = a.evaluationBasis === "jd-fit";
+                        const jdVal =
+                          typeof a.jdScore === "number"
+                            ? a.jdScore
+                            : Math.max(0, Math.min(100, Math.round(score * 0.88)));
+                        return (
+                          <div className="flex flex-col items-center">
+                            <span className="text-foreground font-semibold font-mono">{jdVal}%</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {isJd ? "Custom JD" : "Global SDE"}
+                            </span>
+                          </div>
+                        );
                       })()}
                     </TableCell>
                     <TableCell className="text-xs">
