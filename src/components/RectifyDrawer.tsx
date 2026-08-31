@@ -664,7 +664,7 @@ export function RectifyDrawer({
                     <div className="space-y-4">
                       {/* Summary Counts by Type */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {(["spelling", "grammar", "punctuation", "phrasing", "capitalization", "repetition"] as const)
+                        {(["spelling", "grammar", "punctuation", "phrasing", "capitalization", "repetition", "ocr"] as const)
                           .map((type) => {
                             const count = grammarIssues.filter((i) => i.type === type).length;
                             if (count === 0) return null;
@@ -675,6 +675,7 @@ export function RectifyDrawer({
                               phrasing: "text-violet-600 bg-violet-500/10 border-violet-500/30",
                               capitalization: "text-orange-600 bg-orange-500/10 border-orange-500/30",
                               repetition: "text-slate-600 bg-slate-500/10 border-slate-500/30",
+                              ocr: "text-red-600 bg-red-500/10 border-red-500/30",
                             };
                             return (
                               <div key={type} className={`rounded-lg border p-2.5 text-center ${colors[type] || ""}`}>
@@ -696,6 +697,7 @@ export function RectifyDrawer({
                             phrasing: "bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30",
                             capitalization: "bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30",
                             repetition: "bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-500/30",
+                            ocr: "bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/30",
                           };
                           const sevColor =
                             issue.severity === "critical"

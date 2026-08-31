@@ -11,7 +11,7 @@
 
 export type GrammarIssue = {
   id: string;
-  type: "spelling" | "grammar" | "punctuation" | "repetition" | "phrasing" | "capitalization";
+  type: "spelling" | "grammar" | "punctuation" | "repetition" | "phrasing" | "capitalization" | "ocr";
   severity: "critical" | "major" | "minor";
   error: string;
   fix: string;
@@ -289,7 +289,109 @@ const PUNCTUATION_PATTERNS: Array<{ re: RegExp; fix: string; explain: string }> 
 ];
 
 /* ========================================================================= */
-/*  4. TENSE INCONSISTENCY DETECTOR                                          */
+/*  4. OCR ARTIFACT / DIGIT-LETTER CORRUPTION DETECTOR                       */
+/* ========================================================================= */
+
+/**
+ * Detects words where OCR has swapped letters for visually similar digits:
+ *   0↔o, 1↔l/i, 5↔s, 8↔b, 6↔g, 3↔e, 7↔t, 2↔z
+ * Common on scanned/image-based PDFs.
+ */
+function detectOcrArtifacts(text: string, findLine: (idx: number) => number): GrammarIssue[] {
+  const issues: GrammarIssue[] = [];
+
+  // Map of digit→letter substitutions for correction
+  const digitToLetter: Record<string, string> = {
+    "0": "o", "1": "l", "5": "s", "8": "b", "6": "g", "3": "e", "7": "t", "2": "z",
+  };
+  const letterToDigit: Record<string, string> = {};
+  for (const [d, l] of Object.entries(digitToLetter)) letterToDigit[l] = d;
+
+  // Common English words that appear in resumes — used as reference dictionary
+  const COMMON_WORDS = new Set([
+    "about", "above", "across", "after", "also", "always", "among", "analysis",
+    "application", "applications", "approach", "architecture", "assessment",
+    "automated", "backend", "based", "between", "both", "build", "building",
+    "built", "business", "capable", "client", "cloud", "code", "collaboration",
+    "college", "communication", "company", "complex", "component", "components",
+    "computer", "configured", "contact", "contribution", "created", "cross",
+    "custom", "database", "databases", "degree", "delivered", "deployed",
+    "deployment", "design", "designed", "detailed", "developed", "developer",
+    "developing", "development", "digital", "distributed", "docker",
+    "documentation", "driven", "during", "education", "efficient", "electronic",
+    "email", "embedded", "employed", "enabled", "engine", "engineer",
+    "engineering", "enterprise", "environment", "established", "evaluation",
+    "event", "events", "example", "excellent", "experience", "expertise",
+    "exploring", "features", "first", "focused", "following", "framework",
+    "frontend", "full", "function", "functional", "generated", "github",
+    "global", "goals", "good", "google", "graduate", "graduation",
+    "handled", "helped", "highly", "hours", "implemented", "improved",
+    "including", "increased", "independent", "information", "infrastructure",
+    "innovation", "integrated", "integration", "intelligent", "interest",
+    "internship", "into", "introduction", "involved", "issue", "issues",
+    "knowledge", "language", "languages", "large", "latest", "leadership",
+    "learning", "level", "linkedin", "local", "logic", "looking",
+    "machine", "maintained", "management", "model", "models", "module",
+    "modules", "monitoring", "more", "most", "multiple", "objective",
+    "obtained", "online", "open", "operating", "operations", "optimization",
+    "optimized", "organized", "overall", "participated", "passionate",
+    "performance", "personal", "phone", "platform", "portfolio", "position",
+    "problem", "problems", "process", "processing", "professional", "proficient",
+    "programming", "project", "projects", "provided", "python", "quality",
+    "real", "reduced", "related", "relevant", "reliable", "report",
+    "research", "resolution", "resource", "resources", "responsive",
+    "result", "results", "role", "scale", "science", "security", "server",
+    "service", "services", "skills", "software", "solution", "solutions",
+    "source", "stack", "standard", "strong", "structure", "student",
+    "successfully", "support", "system", "systems", "team", "technical",
+    "technology", "testing", "through", "time", "title", "together",
+    "tools", "total", "training", "university", "used", "user", "using",
+    "various", "version", "website", "while", "with", "within", "work",
+    "worked", "working", "world",
+  ]);
+
+  // Regex to find words that mix letters and digits (excluding pure numbers, version strings, tech names)
+  const mixedRe = /\b([a-z]+\d[a-z0-9]*|[a-z0-9]*\d[a-z]+)\b/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = mixedRe.exec(text)) !== null) {
+    const raw = match[0];
+    // Skip pure numbers, version strings (v2.0), hex codes, known tech (h2, s3, ec2, mp3, utf8, x86)
+    if (/^\d+$/.test(raw)) continue;
+    if (/^(v\d|\d+\.\d|0x|#[0-9a-f])/i.test(raw)) continue;
+    if (/^(h[1-6]|s3|ec2|mp[34]|utf8|x86|i18n|l10n|k8s|c\d|m\d|t\d|r\d|p\d)$/i.test(raw)) continue;
+    if (raw.length < 3) continue;
+
+    // Try correcting digits→letters and check if it produces a known dictionary word
+    const corrected = raw.toLowerCase().replace(/[0-9]/g, (d) => digitToLetter[d] ?? d);
+
+    if (corrected !== raw.toLowerCase() && COMMON_WORDS.has(corrected)) {
+      const snippetStart = Math.max(0, match.index - 20);
+      const snippetEnd = Math.min(text.length, match.index + raw.length + 20);
+      const context = text.slice(snippetStart, snippetEnd).replace(/\r?\n/g, " ").trim();
+
+      const exists = issues.some((i) => i.error.toLowerCase() === raw.toLowerCase());
+      if (!exists) {
+        issues.push({
+          id: `ocr-${issues.length + 1}`,
+          type: "ocr",
+          severity: "critical",
+          error: raw,
+          fix: corrected,
+          explanation: `OCR corruption: digit(s) substituted for letter(s) — '${raw}' should be '${corrected}'`,
+          context: `"…${context}…"`,
+          line: findLine(match.index),
+        });
+      }
+      if (issues.length >= 15) break;
+    }
+  }
+
+  return issues;
+}
+
+/* ========================================================================= */
+/*  5. TENSE INCONSISTENCY DETECTOR                                          */
 /* ========================================================================= */
 
 function detectTenseInconsistency(bullets: string[]): GrammarIssue[] {
@@ -529,13 +631,19 @@ export function analyzeGrammar(text: string): {
     if (issues.length >= MAX_ISSUES) break;
   }
 
-  // 4. TENSE INCONSISTENCY
+  // 4. OCR ARTIFACT DETECTION (digit↔letter corruption from scanned PDFs)
+  if (issues.length < MAX_ISSUES) {
+    const ocrIssues = detectOcrArtifacts(text, findLine);
+    issues.push(...ocrIssues.slice(0, MAX_ISSUES - issues.length));
+  }
+
+  // 5. TENSE INCONSISTENCY
   if (issues.length < MAX_ISSUES) {
     const tenseIssues = detectTenseInconsistency(bullets);
     issues.push(...tenseIssues.slice(0, MAX_ISSUES - issues.length));
   }
 
-  // 5. CAPITALIZATION AUDIT
+  // 6. CAPITALIZATION AUDIT
   if (issues.length < MAX_ISSUES) {
     const capIssues = detectCapitalizationErrors(lines);
     issues.push(...capIssues.slice(0, MAX_ISSUES - issues.length));
