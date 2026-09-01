@@ -1,4 +1,4 @@
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -103,18 +103,25 @@ export function RectifyDrawer({
   const [notes, setNotes] = useState("");
   const [manual, setManual] = useState<string>("");
   const [, startTransition] = useTransition();
+  const prevTargetIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (target?.analysis) {
-      setNotes(target.analysis.officerNotes ?? "");
-      setManual(
-        target.analysis.manualScore !== null && target.analysis.manualScore !== undefined
-          ? String(target.analysis.manualScore)
-          : "",
-      );
-      setActiveNav("overview");
+      // Only reset activeNav and input fields when the user switches to a different candidate
+      if (prevTargetIdRef.current !== target.id) {
+        prevTargetIdRef.current = target.id;
+        setNotes(target.analysis.officerNotes ?? "");
+        setManual(
+          target.analysis.manualScore !== null && target.analysis.manualScore !== undefined
+            ? String(target.analysis.manualScore)
+            : "",
+        );
+        setActiveNav("overview");
+      }
+    } else {
+      prevTargetIdRef.current = null;
     }
-  }, [target]);
+  }, [target?.id, target?.analysis]);
 
   if (!target) return null;
   const a = target.analysis;
@@ -130,7 +137,8 @@ export function RectifyDrawer({
   const totalMissing = (a.skillMatrix?.missing || []).length;
   const totalRewrites = (a.bulletRewrites || []).length;
   const grammarIssues: GrammarIssue[] = atsData.metrics?.grammarIssues ?? [];
-  const grammarCount = grammarIssues.length;
+  const genAiGrammarList = a.grammarAndOcrErrors || [];
+  const grammarCount = grammarIssues.length > 0 ? grammarIssues.length : genAiGrammarList.length;
 
   const handleSave = () => {
     const parsed = manual.trim() === "" ? null : Number(manual);
@@ -625,9 +633,9 @@ export function RectifyDrawer({
                         <Wrench className="size-3.5 text-primary" />
                         Formatting &amp; Scannability Flags
                       </h4>
-                      {a.formattingProblems.length > 0 || a.grammarAndOcrErrors.length > 0 ? (
+                      {a.formattingProblems.length > 0 ? (
                         <ul className="space-y-2">
-                          {[...a.formattingProblems, ...a.grammarAndOcrErrors].map((item, i) => (
+                          {a.formattingProblems.map((item, i) => (
                             <li key={i} className="text-xs text-foreground/90 bg-background/80 p-2.5 rounded-lg border border-border/60 flex items-start gap-1.5">
                               <span className="text-amber-500 font-bold">•</span>
                               <span>{item}</span>
@@ -635,7 +643,7 @@ export function RectifyDrawer({
                           ))}
                         </ul>
                       ) : (
-                        <p className="text-xs text-muted-foreground">Clean formatting hygiene and ATS scannable typography.</p>
+                        <p className="text-xs text-muted-foreground">Clean formatting hygiene and ATS scannable single-column layout.</p>
                       )}
                     </div>
                   </div>
@@ -660,95 +668,126 @@ export function RectifyDrawer({
                     </Badge>
                   </div>
 
-                  {grammarCount > 0 ? (
+                  {grammarIssues.length > 0 || genAiGrammarList.length > 0 ? (
                     <div className="space-y-4">
-                      {/* Summary Counts by Type */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {(["spelling", "grammar", "punctuation", "phrasing", "capitalization", "repetition", "ocr"] as const)
-                          .map((type) => {
-                            const count = grammarIssues.filter((i) => i.type === type).length;
-                            if (count === 0) return null;
-                            const colors: Record<string, string> = {
-                              spelling: "text-rose-600 bg-rose-500/10 border-rose-500/30",
-                              grammar: "text-amber-600 bg-amber-500/10 border-amber-500/30",
-                              punctuation: "text-sky-600 bg-sky-500/10 border-sky-500/30",
-                              phrasing: "text-violet-600 bg-violet-500/10 border-violet-500/30",
-                              capitalization: "text-orange-600 bg-orange-500/10 border-orange-500/30",
-                              repetition: "text-slate-600 bg-slate-500/10 border-slate-500/30",
-                              ocr: "text-red-600 bg-red-500/10 border-red-500/30",
-                            };
-                            return (
-                              <div key={type} className={`rounded-lg border p-2.5 text-center ${colors[type] || ""}`}>
-                                <p className="text-xl font-bold font-mono">{count}</p>
-                                <p className="text-[10px] uppercase tracking-wider font-bold">{type}</p>
-                              </div>
-                            );
-                          })
-                          .filter(Boolean)}
-                      </div>
+                      {/* Deterministic Grammar / Spelling Issues */}
+                      {grammarIssues.length > 0 && (
+                        <>
+                          {/* Summary Counts by Type */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            {(["spelling", "grammar", "punctuation", "phrasing", "capitalization", "repetition", "ocr"] as const)
+                              .map((type) => {
+                                const count = grammarIssues.filter((i) => i.type === type).length;
+                                if (count === 0) return null;
+                                const colors: Record<string, string> = {
+                                  spelling: "text-rose-600 bg-rose-500/10 border-rose-500/30",
+                                  grammar: "text-amber-600 bg-amber-500/10 border-amber-500/30",
+                                  punctuation: "text-sky-600 bg-sky-500/10 border-sky-500/30",
+                                  phrasing: "text-violet-600 bg-violet-500/10 border-violet-500/30",
+                                  capitalization: "text-orange-600 bg-orange-500/10 border-orange-500/30",
+                                  repetition: "text-slate-600 bg-slate-500/10 border-slate-500/30",
+                                  ocr: "text-red-600 bg-red-500/10 border-red-500/30",
+                                };
+                                return (
+                                  <div key={type} className={`rounded-lg border p-2.5 text-center ${colors[type] || ""}`}>
+                                    <p className="text-xl font-bold font-mono">{count}</p>
+                                    <p className="text-[10px] uppercase tracking-wider font-bold">{type}</p>
+                                  </div>
+                                );
+                              })
+                              .filter(Boolean)}
+                          </div>
 
-                      {/* Individual Issues */}
-                      <div className="grid gap-2.5">
-                        {grammarIssues.map((issue, idx) => {
-                          const typeBadgeColor: Record<string, string> = {
-                            spelling: "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/30",
-                            grammar: "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30",
-                            punctuation: "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/30",
-                            phrasing: "bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30",
-                            capitalization: "bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30",
-                            repetition: "bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-500/30",
-                            ocr: "bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/30",
-                          };
-                          const sevColor =
-                            issue.severity === "critical"
-                              ? "border-l-rose-500"
-                              : issue.severity === "major"
-                                ? "border-l-amber-500"
-                                : "border-l-sky-400";
-                          return (
-                            <div
-                              key={idx}
-                              className={`rounded-xl border border-border bg-card p-3.5 space-y-2 border-l-4 ${sevColor} transition-all hover:shadow-xs`}
-                            >
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${typeBadgeColor[issue.type] || ""}`}>
-                                  {issue.type}
-                                </Badge>
-                                <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${
-                                  issue.severity === "critical" ? "bg-rose-500/20 text-rose-600 border-rose-500/40" :
-                                  issue.severity === "major" ? "bg-amber-500/20 text-amber-600 border-amber-500/40" :
-                                  "bg-muted text-muted-foreground border-border"
-                                }`}>
-                                  {issue.severity}
-                                </Badge>
-                                {issue.line && (
-                                  <span className="text-[10px] font-mono text-muted-foreground">Line {issue.line}</span>
-                                )}
-                              </div>
+                          {/* Individual Issues */}
+                          <div className="grid gap-2.5">
+                            {grammarIssues.map((issue, idx) => {
+                              const typeBadgeColor: Record<string, string> = {
+                                spelling: "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/30",
+                                grammar: "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30",
+                                punctuation: "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/30",
+                                phrasing: "bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30",
+                                capitalization: "bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30",
+                                repetition: "bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-500/30",
+                                ocr: "bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/30",
+                              };
+                              const sevColor =
+                                issue.severity === "critical"
+                                  ? "border-l-rose-500"
+                                  : issue.severity === "major"
+                                    ? "border-l-amber-500"
+                                    : "border-l-sky-400";
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`rounded-xl border border-border bg-card p-3.5 space-y-2 border-l-4 ${sevColor} transition-all hover:shadow-xs`}
+                                >
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${typeBadgeColor[issue.type] || ""}`}>
+                                      {issue.type}
+                                    </Badge>
+                                    <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md ${
+                                      issue.severity === "critical" ? "bg-rose-500/20 text-rose-600 border-rose-500/40" :
+                                      issue.severity === "major" ? "bg-amber-500/20 text-amber-600 border-amber-500/40" :
+                                      "bg-muted text-muted-foreground border-border"
+                                    }`}>
+                                      {issue.severity}
+                                    </Badge>
+                                    {issue.line && (
+                                      <span className="text-[10px] font-mono text-muted-foreground">Line {issue.line}</span>
+                                    )}
+                                  </div>
 
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="font-mono bg-rose-500/10 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded border border-rose-500/20 line-through">
-                                  {issue.error}
-                                </span>
-                                <ArrowRight className="size-3 text-muted-foreground shrink-0" />
-                                <span className="font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20 font-semibold">
-                                  {issue.fix}
-                                </span>
-                              </div>
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className="font-mono bg-rose-500/10 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded border border-rose-500/20 line-through">
+                                      {issue.error}
+                                    </span>
+                                    <ArrowRight className="size-3 text-muted-foreground shrink-0" />
+                                    <span className="font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20 font-semibold">
+                                      {issue.fix}
+                                    </span>
+                                  </div>
 
-                              <p className="text-[11px] text-muted-foreground">
-                                {issue.explanation}
-                              </p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {issue.explanation}
+                                  </p>
 
-                              {issue.context && (
-                                <div className="bg-background/80 p-2 rounded-lg border border-border/60 text-[11px] font-mono text-muted-foreground">
-                                  {issue.context}
+                                  {issue.context && (
+                                    <div className="bg-background/80 p-2 rounded-lg border border-border/60 text-[11px] font-mono text-muted-foreground">
+                                      {issue.context}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+
+                      {/* GenAI Grammar Audit Issues */}
+                      {genAiGrammarList.length > 0 && (
+                        <div className="space-y-2.5">
+                          {grammarIssues.length > 0 && (
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground pt-1">
+                              Additional Language &amp; Phrasing Notes ({genAiGrammarList.length})
+                            </h4>
+                          )}
+                          <div className="grid gap-2.5">
+                            {genAiGrammarList.map((err, idx) => (
+                              <div
+                                key={idx}
+                                className="rounded-xl border border-border bg-card p-3.5 space-y-2 border-l-4 border-l-amber-500 transition-all hover:shadow-xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider px-2 py-0 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                    Language &amp; Phrasing Issue
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-foreground font-medium">{err}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-8 text-center space-y-2">

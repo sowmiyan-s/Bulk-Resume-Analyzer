@@ -88,9 +88,12 @@ export async function saveAnalysis(input: {
 
   const row = toRow(input, "done" as const);
 
-  // 1. Always update local cache first for zero-latency UI
+  // 1. Always update local cache first for zero-latency UI (deduplicating by file_name and id)
   const all = readLocal();
-  const next = all.filter((r) => r.id !== row.id).concat(row);
+  const fileKey = (row.file_name || "").trim().toLowerCase();
+  const next = all
+    .filter((r) => r.id !== row.id && (!fileKey || (r.file_name || "").trim().toLowerCase() !== fileKey))
+    .concat(row);
   writeLocal(next);
 
   // 2. Persist to MongoDB Atlas cloud database via server function.
@@ -180,8 +183,31 @@ export async function markAnalysisInFlight(input: {
 
   // Local cache update for instant UI
   const all = readLocal();
-  const next = all.filter((r) => r.id !== row.id).concat(row);
+  const fileKey = (row.file_name || "").trim().toLowerCase();
+  const next = all
+    .filter((r) => r.id !== row.id && (!fileKey || (r.file_name || "").trim().toLowerCase() !== fileKey))
+    .concat(row);
   writeLocal(next);
+}
+
+/** Helper to strictly deduplicate an array of stored records by file_name */
+function deduplicateStoredList(list: StoredAnalysis[]): StoredAnalysis[] {
+  const map = new Map<string, StoredAnalysis>();
+  for (const item of list) {
+    const key = (item.file_name || item.id || "").trim().toLowerCase();
+    if (!key) continue;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, item);
+    } else {
+      const existingTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+      const itemTime = new Date(item.updated_at || item.created_at || 0).getTime();
+      if (itemTime >= existingTime || (item.analysis && !existing.analysis)) {
+        map.set(key, item);
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 /** Returns ids of candidates left in `in_flight` by a crashed/abandoned batch. */
@@ -196,12 +222,12 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
     const res = await loadAnalysesMongoFn();
     if (res && res.success && Array.isArray(res.items)) {
       if (res.items.length > 0) {
-        // Merge with any local records
-        const local = readLocal().filter((l) => !res.items.some((r) => r.id === l.id));
-        const combined = [...(res.items as StoredAnalysis[]), ...local];
+        // Merge with any local records and deduplicate strictly by file_name
+        const local = readLocal();
+        const combined = deduplicateStoredList([...(res.items as StoredAnalysis[]), ...local]);
         writeLocal(combined);
 
-// In background, sync any local-only records up to MongoDB Atlas
+        // In background, sync any local-only records up to MongoDB Atlas
         if (local.length > 0) {
           for (const item of local) {
             if (item.analysis) {
@@ -221,7 +247,7 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
         return combined;
       } else {
         // MongoDB collection is currently empty; sync local cache to MongoDB
-        const local = readLocal();
+        const local = deduplicateStoredList(readLocal());
         if (local.length > 0) {
           for (const item of local) {
             if (item.analysis) {
@@ -244,7 +270,7 @@ export async function loadAnalyses(): Promise<StoredAnalysis[]> {
     console.warn("[storage] MongoDB load failed, using local cache:", e);
   }
 
-  return readLocal().slice().reverse();
+  return deduplicateStoredList(readLocal()).reverse();
 }
 
 /** Delete a single stored analysis by ID from both localStorage and MongoDB Atlas. */

@@ -93,34 +93,54 @@ export function MasterTable({
 
   const cutoff = shortlistCutoff ?? 75;
 
+  // Deduplicate rows by file name so each candidate/resume only ever has one entry
+  const uniqueRows = useMemo(() => {
+    const map = new Map<string, MasterRow>();
+    for (const r of rows) {
+      if (!r || !r.analysis) continue;
+      const key = (r.fileName || r.id || "").trim().toLowerCase();
+      if (!key) continue;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, r);
+      } else {
+        // Keep the more complete or higher scored one if duplicate exists
+        if (effectiveScore(r.analysis) >= effectiveScore(existing.analysis)) {
+          map.set(key, r);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [rows]);
+
   const shortlistedCount = useMemo(() => {
-    return rows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
-  }, [rows, cutoff]);
+    return uniqueRows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
+  }, [uniqueRows, cutoff]);
 
   const tierCounts = useMemo(() => {
     return {
-      all: rows.length,
-      "Tier 1": rows.filter((r) => r.analysis.readinessTier.startsWith("Tier 1")).length,
-      "Tier 2": rows.filter((r) => r.analysis.readinessTier.startsWith("Tier 2")).length,
-      "Tier 3": rows.filter((r) => r.analysis.readinessTier.startsWith("Tier 3")).length,
+      all: uniqueRows.length,
+      "Tier 1": uniqueRows.filter((r) => r.analysis.readinessTier.startsWith("Tier 1")).length,
+      "Tier 2": uniqueRows.filter((r) => r.analysis.readinessTier.startsWith("Tier 2")).length,
+      "Tier 3": uniqueRows.filter((r) => r.analysis.readinessTier.startsWith("Tier 3")).length,
     };
-  }, [rows]);
+  }, [uniqueRows]);
 
   const scoreCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: rows.length };
+    const counts: Record<string, number> = { all: uniqueRows.length };
     for (const cat of SCORE_CATEGORIES) {
       if (cat.id === "all") continue;
-      counts[cat.id] = rows.filter((r) => {
+      counts[cat.id] = uniqueRows.filter((r) => {
         const score = effectiveScore(r.analysis);
         return score >= cat.min && score <= cat.max;
       }).length;
     }
     return counts;
-  }, [rows]);
+  }, [uniqueRows]);
 
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = rows.filter((r) => {
+    let list = uniqueRows.filter((r) => {
       if (!r || !r.analysis) return false;
       const score = effectiveScore(r.analysis);
 

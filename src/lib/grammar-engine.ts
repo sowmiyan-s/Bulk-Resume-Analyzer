@@ -438,12 +438,49 @@ function detectTenseInconsistency(bullets: string[]): GrammarIssue[] {
 /*  5. CAPITALIZATION AUDIT                                                  */
 /* ========================================================================= */
 
+// Helper to identify ranges in text corresponding to URLs, emails, domains, and links
+function getIgnoredRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const urlEmailRe =
+    /(?:https?:\/\/[^\s"'<>]+|www\.[^\s"'<>]+|(?:github|linkedin|gitlab|leetcode|hackerrank|codeforces|kaggle|medium|vercel|netlify|render)\.com\/[^\s"'<>]+|[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\.[a-zA-Z]{2,}|(?:github|linkedin|portfolio|profile|website):\s*[^\s|,;]+|[a-zA-Z0-9-]+\.(?:dev|io|app|tech|org|net|co|me|in|com)(?:\/[^\s"'<>]*)?)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = urlEmailRe.exec(text)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return ranges;
+}
+
+function isInsideIgnoredRange(
+  start: number,
+  length: number,
+  ranges: Array<{ start: number; end: number }>,
+): boolean {
+  const end = start + length;
+  return ranges.some(
+    (r) =>
+      (start >= r.start && start < r.end) ||
+      (end > r.start && end <= r.end) ||
+      (start <= r.start && end >= r.end),
+  );
+}
+
+function stripLinksAndEmails(line: string): string {
+  return line
+    .replace(
+      /(?:https?:\/\/[^\s"'<>]+|www\.[^\s"'<>]+|(?:github|linkedin|gitlab|leetcode|hackerrank|codeforces|kaggle|medium|vercel|netlify)\.com\/[^\s"'<>]+|[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9-]+\.(?:dev|io|app|tech|org|net|co|me|in|com)(?:\/[^\s"'<>]*)?)/gi,
+      " ",
+    )
+    .replace(/(?:github|linkedin|portfolio|website):\s*[^\s|,;]+/gi, " ")
+    .replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
+}
+
 function detectCapitalizationErrors(lines: string[]): GrammarIssue[] {
   const issues: GrammarIssue[] = [];
 
   // Lowercase 'i' as pronoun
   const lowerIPat = /\b(i)\s+(am|have|worked|built|developed|created|was|designed|implemented|managed|led|can|will|would)\b/g;
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = stripLinksAndEmails(rawLine);
     let match: RegExpExecArray | null;
     while ((match = lowerIPat.exec(line)) !== null) {
       issues.push({
@@ -479,9 +516,10 @@ function detectCapitalizationErrors(lines: string[]): GrammarIssue[] {
     { re: /\bexpressjs\b/gi, correct: "Express.js" },
   ];
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
     // Only flag if the word is in a skill/tech section context (not inside URLs or code)
-    if (/^(http|www\.|github\.com)/i.test(line.trim())) continue;
+    if (/^(http|www\.|github\.com|linkedin\.com)/i.test(rawLine.trim())) continue;
+    const line = stripLinksAndEmails(rawLine);
 
     for (const brand of brandFixes) {
       let m: RegExpExecArray | null;
@@ -519,7 +557,9 @@ export function analyzeGrammar(text: string): {
   scorePenalty: number;
 } {
   const issues: GrammarIssue[] = [];
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const ignoredRanges = getIgnoredRanges(text);
+  const rawLines = text.split(/\r?\n/);
+  const lines = rawLines.map((l) => l.trim()).filter(Boolean);
   const bullets = lines.filter(
     (l) =>
       /^[-•*▪◦‣·–—>]/.test(l) || (l.length > 40 && /^[A-Z][a-z]+ed\b|^[A-Z][a-z]+ing\b/.test(l)),
@@ -529,7 +569,6 @@ export function analyzeGrammar(text: string): {
   // Helper: find line number for a match index
   const findLine = (matchIndex: number): number => {
     let charCount = 0;
-    const rawLines = text.split(/\r?\n/);
     for (let i = 0; i < rawLines.length; i++) {
       charCount += rawLines[i].length + 1; // +1 for newline
       if (charCount > matchIndex) return i + 1;
@@ -544,6 +583,12 @@ export function analyzeGrammar(text: string): {
     while ((match = re.exec(text)) !== null) {
       const matchText = match[0];
       const matchIndex = match.index;
+
+      // Skip anything occurring within URLs, emails, or links
+      if (isInsideIgnoredRange(matchIndex, matchText.length, ignoredRanges)) {
+        continue;
+      }
+
       const snippetStart = Math.max(0, matchIndex - 25);
       const snippetEnd = Math.min(text.length, matchIndex + matchText.length + 25);
       const context = text.slice(snippetStart, snippetEnd).replace(/\r?\n/g, " ").trim();
@@ -574,12 +619,18 @@ export function analyzeGrammar(text: string): {
     let match: RegExpExecArray | null;
     while ((match = re.exec(text)) !== null) {
       const matchText = match[0];
+      const matchIndex = match.index;
+
+      // Skip links / emails
+      if (isInsideIgnoredRange(matchIndex, matchText.length, ignoredRanges)) {
+        continue;
+      }
+
       // Skip number repeats
       if (/^\d+\s+\d+$/.test(matchText)) continue;
       // Skip short repeated words that are intentional (e.g. "to to" false positive in "to together")
       if (matchText.length < 4 && item.explain.includes("repetition")) continue;
 
-      const matchIndex = match.index;
       const snippetStart = Math.max(0, matchIndex - 25);
       const snippetEnd = Math.min(text.length, matchIndex + matchText.length + 25);
       const context = text.slice(snippetStart, snippetEnd).replace(/\r?\n/g, " ").trim();
@@ -609,9 +660,16 @@ export function analyzeGrammar(text: string): {
     let puncCount = 0;
     while ((match = re.exec(text)) !== null) {
       const matchText = match[0];
+      const matchIndex = match.index;
+
+      // Skip links / emails
+      if (isInsideIgnoredRange(matchIndex, matchText.length, ignoredRanges)) {
+        continue;
+      }
+
       // Avoid false positives on decimals/versions "3.14", "v2.0", URLs
       if (/^\d[.:]\d$/.test(matchText)) continue;
-      if (/https?:\/\//.test(text.slice(Math.max(0, match.index - 10), match.index + matchText.length + 5))) continue;
+      if (/https?:\/\//.test(text.slice(Math.max(0, matchIndex - 10), matchIndex + matchText.length + 5))) continue;
 
       const exists = issues.some((i) => i.error === matchText && i.type === "punctuation");
       if (!exists) {
@@ -622,7 +680,7 @@ export function analyzeGrammar(text: string): {
           error: matchText,
           fix: item.fix.replace(/\$1/g, match[1] || "").replace(/\$2/g, match[2] || ""),
           explanation: item.explain,
-          line: findLine(match.index),
+          line: findLine(matchIndex),
         });
         puncCount++;
       }
@@ -633,7 +691,11 @@ export function analyzeGrammar(text: string): {
 
   // 4. OCR ARTIFACT DETECTION (digit↔letter corruption from scanned PDFs)
   if (issues.length < MAX_ISSUES) {
-    const ocrIssues = detectOcrArtifacts(text, findLine);
+    const ocrIssues = detectOcrArtifacts(text, findLine).filter((i) => {
+      // Filter out if it occurs inside links or tech names
+      const mIdx = text.toLowerCase().indexOf(i.error.toLowerCase());
+      return mIdx === -1 || !isInsideIgnoredRange(mIdx, i.error.length, ignoredRanges);
+    });
     issues.push(...ocrIssues.slice(0, MAX_ISSUES - issues.length));
   }
 

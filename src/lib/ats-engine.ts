@@ -65,43 +65,78 @@ export type AtsReport = {
     roleArc: RoleArc;
     /** GenAI / domestic-AI tool taxonomy detected from the resume text. */
     toolTaxonomy: ToolTaxonomyResult;
+    /** Detailed document segmentation & extracted structure */
+    parsedDocument?: ParsedDocument;
   };
   /** Hard blockers an applicant tracking system would trip on. */
   blockers: string[];
   computedAt: string;
 };
 
+export type ParsedSectionType =
+  | "contact"
+  | "summary"
+  | "skills"
+  | "experience"
+  | "education"
+  | "projects"
+  | "certifications"
+  | "achievements"
+  | "other";
+
+export type ParsedSection = {
+  type: ParsedSectionType;
+  title: string;
+  lines: string[];
+  rawText: string;
+};
+
+export type ParsedDocument = {
+  sections: ParsedSection[];
+  projectEntries: Array<{ name: string; bullets: string[]; tools: string[] }>;
+  experienceEntries: Array<{ title: string; bullets: string[] }>;
+  bullets: string[];
+  powerVerbCount: number;
+  standardVerbCount: number;
+  weakVerbBullets: string[];
+  provenSkills: string[];
+  educationSnippet?: string;
+};
+
 /* ------------------------------- vocab ------------------------------- */
 
-const ACTION_VERBS = [
-  "accelerated", "accomplished", "achieved", "adapted", "administered", "analyzed", "appended", "applied",
-  "architected", "audited", "authored", "automated", "benchmarked", "boosted", "built", "calculated",
-  "centralized", "championed", "compiled", "composed", "computed", "conceptualized", "conducted", "configured",
-  "consolidated", "constructed", "containerized", "converted", "coordinated", "created", "customized", "cut",
-  "debugged", "decreased", "defined", "delegated", "delivered", "demonstrated", "deployed", "designed",
-  "developed", "devised", "diagnosed", "directed", "discovered", "dispatched", "distributed", "documented",
-  "doubled", "drafted", "drove", "eliminated", "embedded", "enabled", "engineered", "enhanced",
-  "established", "evaluated", "exceeded", "executed", "expanded", "expedited", "extracted", "fabricated",
-  "facilitated", "fine-tuned", "formulated", "founded", "generated", "guided", "handled", "headed",
-  "identified", "implemented", "improved", "incorporated", "increased", "indexed", "initiated", "innovated",
-  "inspected", "installed", "instituted", "integrated", "interfaced", "introduced", "invented", "investigated",
-  "launched", "lead", "led", "leveraged", "maintained", "managed", "mapped", "marshaled",
-  "maximized", "measured", "mentored", "migrated", "minimized", "modeled", "modernized", "modified",
-  "monitored", "motivated", "navigated", "negotiated", "obtained", "operated", "optimized", "orchestrated",
-  "organized", "originated", "overhauled", "oversaw", "packaged", "partnered", "performed", "pioneered",
-  "planned", "positioned", "prepared", "presented", "prevented", "prioritized", "processed", "produced",
-  "programmed", "projected", "promoted", "proposed", "protected", "prototyped", "provided", "published",
-  "queried", "raised", "reached", "realized", "rebuilt", "received", "recommended", "reconciled",
-  "recorded", "recruited", "redesigned", "reduced", "refactored", "refined", "regulated", "reinforced",
-  "remodeled", "rendered", "reorganized", "replaced", "reported", "represented", "researched", "resolved",
-  "restructured", "retrieved", "revamped", "reviewed", "revised", "revitalized", "routed", "saved",
-  "scaled", "scheduled", "screened", "scripted", "scrutinized", "secured", "selected", "served",
-  "shaped", "shared", "shipped", "simplified", "simulated", "slashed", "solicited", "solved",
-  "spearheaded", "specialized", "specified", "standardized", "started", "steered", "streamlined", "strengthened",
-  "structured", "succeeded", "summarized", "supervised", "supplied", "supported", "surpassed", "synthesized",
-  "systematized", "targeted", "taught", "tested", "tracked", "trained", "transcribed", "transformed",
-  "translated", "transmitted", "tripled", "troubleshot", "unified", "unlocked", "upgraded", "utilized",
-  "validated", "verified", "visualized", "won", "wrote",
+export const POWER_VERBS = [
+  "architected", "automated", "benchmarked", "boosted", "centralized", "containerized",
+  "deployed", "designed", "engineered", "fine-tuned", "implemented", "innovated",
+  "migrated", "optimized", "orchestrated", "overhauled", "pioneered", "refactored",
+  "scaled", "spearheaded", "streamlined", "transformed", "unified", "upgraded",
+];
+
+export const STANDARD_VERBS = [
+  "accelerated", "achieved", "analyzed", "applied", "authored", "built", "calculated",
+  "compiled", "configured", "constructed", "converted", "coordinated", "created",
+  "debugged", "delivered", "developed", "devised", "diagnosed", "directed", "discovered",
+  "drafted", "established", "evaluated", "executed", "expanded", "formulated",
+  "generated", "identified", "integrated", "launched", "maintained", "managed",
+  "modeled", "modified", "monitored", "programmed", "published", "queried",
+  "reduced", "resolved", "restructured", "retrieved", "reviewed", "revised",
+  "saved", "secured", "structured", "tested", "tracked", "trained", "validated",
+  "verified", "wrote",
+];
+
+export const ACTION_VERBS = [...POWER_VERBS, ...STANDARD_VERBS];
+
+export const PASSIVE_PHRASES = [
+  "assisted with",
+  "helped with",
+  "worked on",
+  "responsible for",
+  "duties included",
+  "tasked with",
+  "involved in",
+  "participated in",
+  "handled",
+  "contributed to",
 ];
 
 const WEAK_PHRASES = [
@@ -155,49 +190,49 @@ const SECTION_PATTERNS: Array<{ id: string; label: string; re: RegExp; required:
   {
     id: "contact",
     label: "Contact details",
-    re: /(email|phone|mobile|linkedin|github|@)/i,
+    re: /(email|phone|mobile|tel|linkedin|github|portfolio|contact|@)/i,
     required: true,
   },
   {
     id: "summary",
     label: "Summary / Objective",
-    re: /^\s*(professional\s+)?(summary|profile|objective|about\s+me)\b/im,
+    re: /\b(professional\s+|career\s+|executive\s+)?(summary|profile|objective|about\s+me|overview)\b/i,
     required: false,
   },
   {
     id: "skills",
     label: "Skills",
-    re: /^\s*(technical\s+)?(skills|technologies|tech\s+stack|core\s+competencies)\b/im,
+    re: /\b(technical\s+|core\s+|key\s+|computer\s+|programming\s+)?(skills?|skillset|skill-set|technologies|tech\s+stack|competencies|proficiencies|languages\s*(&|and)\s*frameworks)\b/i,
     required: true,
   },
   {
     id: "experience",
     label: "Experience / Internships",
-    re: /^\s*(work\s+)?(experience|employment|internships?|professional\s+experience)\b/im,
+    re: /\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training)\b/i,
     required: true,
   },
   {
     id: "education",
     label: "Education",
-    re: /^\s*(education|academic|qualifications)\b/im,
+    re: /\b(educational\s+|academic\s+|scholastic\s+)?(education|qualifications?|background|academics|degrees?)\b/i,
     required: true,
   },
   {
     id: "projects",
     label: "Projects",
-    re: /^\s*(projects?|personal\s+projects|academic\s+projects)\b/im,
+    re: /\b(personal\s+|academic\s+|key\s+|technical\s+|selected\s+|notable\s+|major\s+|mini\s+|capstone\s+)?(projects?|project\s+work|initiatives)\b/i,
     required: true,
   },
   {
     id: "certifications",
     label: "Certifications",
-    re: /^\s*(certifications?|licenses?|accreditations?|courses)\b/im,
+    re: /\b(certifications?|certificates?|licenses?|accreditations?|courses|trainings?\s*(&|and)\s*certifications?)\b/i,
     required: false,
   },
   {
     id: "achievements",
     label: "Achievements",
-    re: /^\s*(achievements?|awards?|honou?rs|accomplishments|extra[- ]?curricular)\b/im,
+    re: /\b(achievements?|awards?|honou?rs|accomplishments|extra[- ]?curricular|co[- ]?curricular|coding\s+profiles|hackathons?|publications?)\b/i,
     required: false,
   },
 ];
@@ -358,23 +393,141 @@ const cat = (id: string, label: string, checks: AtsCheck[], max: number): AtsCat
   checks,
 });
 
+/* ------------------------------- document parser ------------------------------- */
+
+export function parseDocumentSections(text: string): ParsedDocument {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const sections: ParsedSection[] = [];
+  let currentSection: ParsedSection = {
+    type: "contact",
+    title: "Header",
+    lines: [],
+    rawText: "",
+  };
+
+  const isHeaderLine = (line: string): { isHeader: boolean; type: ParsedSectionType; title: string } => {
+    if (line.length > 55 || /^[-•*▪◦‣·–—>\d.]\s/.test(line)) {
+      return { isHeader: false, type: "other", title: "" };
+    }
+    const clean = line.replace(/^[#•\-\*|>:\s]+|[#•\-\*|>:\s]+$/g, "").trim();
+    if (!clean) return { isHeader: false, type: "other", title: "" };
+
+    if (/\b(professional\s+|career\s+|executive\s+)?(summary|profile|objective|about\s+me|overview)\b/i.test(clean)) {
+      return { isHeader: true, type: "summary", title: clean };
+    }
+    if (/\b(technical\s+|core\s+|key\s+|computer\s+|programming\s+)?(skills?|skillset|skill-set|technologies|tech\s+stack|competencies|proficiencies|languages\s*(&|and)\s*frameworks)\b/i.test(clean)) {
+      return { isHeader: true, type: "skills", title: clean };
+    }
+    if (/\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training)\b/i.test(clean)) {
+      return { isHeader: true, type: "experience", title: clean };
+    }
+    if (/\b(educational\s+|academic\s+|scholastic\s+)?(education|qualifications?|background|academics|degrees?)\b/i.test(clean)) {
+      return { isHeader: true, type: "education", title: clean };
+    }
+    if (/\b(personal\s+|academic\s+|key\s+|technical\s+|selected\s+|notable\s+|major\s+|mini\s+|capstone\s+)?(projects?|project\s+work|initiatives)\b/i.test(clean)) {
+      return { isHeader: true, type: "projects", title: clean };
+    }
+    if (/\b(certifications?|certificates?|licenses?|accreditations?|courses|trainings?\s*(&|and)\s*certifications?)\b/i.test(clean)) {
+      return { isHeader: true, type: "certifications", title: clean };
+    }
+    if (/\b(achievements?|awards?|honou?rs|accomplishments|extra[- ]?curricular|co[- ]?curricular|coding\s+profiles|hackathons?|publications?)\b/i.test(clean)) {
+      return { isHeader: true, type: "achievements", title: clean };
+    }
+    return { isHeader: false, type: "other", title: "" };
+  };
+
+  for (const line of lines) {
+    const checkHeader = isHeaderLine(line);
+    if (checkHeader.isHeader) {
+      if (currentSection.lines.length > 0 || currentSection.type !== "contact") {
+        currentSection.rawText = currentSection.lines.join("\n");
+        sections.push(currentSection);
+      }
+      currentSection = {
+        type: checkHeader.type,
+        title: checkHeader.title,
+        lines: [],
+        rawText: "",
+      };
+    } else {
+      currentSection.lines.push(line);
+    }
+  }
+  if (currentSection.lines.length > 0) {
+    currentSection.rawText = currentSection.lines.join("\n");
+    sections.push(currentSection);
+  }
+
+  // Extract project entries from projects section
+  const projectEntries: Array<{ name: string; bullets: string[]; tools: string[] }> = [];
+  const prjSec = sections.find((s) => s.type === "projects");
+  if (prjSec) {
+    let curPrj: { name: string; bullets: string[]; tools: string[] } | null = null;
+    for (const l of prjSec.lines) {
+      const isBullet = /^[-•*▪◦‣·–—>]/.test(l) || (l.length > 40 && /^[A-Z]/.test(l));
+      if (!isBullet && l.length < 50 && !/^(20\d\d|19\d\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(l)) {
+        if (curPrj) projectEntries.push(curPrj);
+        curPrj = { name: l.replace(/[:\-–|]+$/, "").trim(), bullets: [], tools: [] };
+      } else if (curPrj) {
+        if (isBullet) curPrj.bullets.push(l.replace(/^[-•*▪◦‣·–—>]+\s*/, "").trim());
+        const toolsInLine = containsAny(l, SKILL_TAXONOMY);
+        for (const t of toolsInLine) if (!curPrj.tools.includes(t)) curPrj.tools.push(t);
+      }
+    }
+    if (curPrj) projectEntries.push(curPrj);
+  }
+
+  const allBullets = getBullets(lines);
+  const bulletText = allBullets.join(" ").toLowerCase();
+  const provenSkills = containsAny(bulletText, SKILL_TAXONOMY);
+
+  const powerVerbCount = allBullets.filter((b) => {
+    const firstFew = lc(b).replace(/[^a-z\s]/g, " ").split(/\s+/).slice(0, 2);
+    return firstFew.some((w) => POWER_VERBS.includes(w));
+  }).length;
+
+  const standardVerbCount = allBullets.filter((b) => {
+    const firstFew = lc(b).replace(/[^a-z\s]/g, " ").split(/\s+/).slice(0, 2);
+    return firstFew.some((w) => STANDARD_VERBS.includes(w));
+  }).length;
+
+  const weakVerbBullets = allBullets.filter((b) => {
+    const l = lc(b);
+    return PASSIVE_PHRASES.some((p) => l.startsWith(p) || l.includes(` ${p}`));
+  });
+
+  const eduSec = sections.find((s) => s.type === "education");
+  const educationSnippet = eduSec ? eduSec.lines.slice(0, 3).join(", ") : undefined;
+
+  return {
+    sections,
+    projectEntries,
+    experienceEntries: [],
+    bullets: allBullets,
+    powerVerbCount,
+    standardVerbCount,
+    weakVerbBullets,
+    provenSkills,
+    educationSnippet,
+  };
+}
+
 /* ------------------------------- engine ------------------------------- */
 
 export function runAtsEngine(resumeText: string, jobDescription?: string): AtsReport {
   const text = resumeText ?? "";
   const lines = getLines(text);
-  const bullets = getBullets(lines);
+  const parsed = parseDocumentSections(text);
+  const bullets = parsed.bullets;
   const words = text.split(/\s+/).filter(Boolean).length;
   const estimatedPages = Math.max(1, Math.round((words / 500) * 10) / 10);
 
   const quantifiedBullets = bullets.filter((b) => QUANT_RE.test(b)).length;
-  const actionVerbBullets = bullets.filter((b) => {
-    const firstFew = lc(b)
-      .replace(/[^a-z\s]/g, " ")
-      .split(/\s+/)
-      .slice(0, 3);
-    return firstFew.some((w) => ACTION_VERBS.includes(w));
-  }).length;
+  const actionVerbBullets = parsed.powerVerbCount + parsed.standardVerbCount;
   const hasProofOfWork =
     /(npm install|pip install|pypi\.org|npmjs\.com|patent|research paper|ijcrt|ieee|springer|published in|hackathon|leetcode|codeforces|kaggle|1st prize|2nd prize|3rd prize)/i.test(
       text,
@@ -388,8 +541,11 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   const sectionsFound: string[] = [];
   const sectionsMissing: string[] = [];
   for (const s of SECTION_PATTERNS) {
-    if (s.re.test(text)) sectionsFound.push(s.label);
-    else sectionsMissing.push(s.label);
+    if (parsed.sections.some((sec) => sec.type === s.id)) {
+      sectionsFound.push(s.label);
+    } else if (s.required) {
+      sectionsMissing.push(s.label);
+    }
   }
 
   const skillsFound = containsAny(text, SKILL_TAXONOMY);
@@ -457,18 +613,18 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
 
   /* --- 2. Section structure (20) --- */
   const requiredSections = SECTION_PATTERNS.filter((s) => s.required);
-  const requiredHit = requiredSections.filter((s) => s.re.test(text)).length;
-  const optionalHit = SECTION_PATTERNS.filter((s) => !s.required && s.re.test(text)).length;
+  const requiredHit = requiredSections.filter((s) => parsed.sections.some((sec) => sec.type === s.id)).length;
+  const optionalHit = SECTION_PATTERNS.filter((s) => !s.required && parsed.sections.some((sec) => sec.type === s.id)).length;
   const structureChecks: AtsCheck[] = [
     check(
       "req-sections",
       "Standard ATS section headings",
-      requiredHit === requiredSections.length,
-      (requiredHit / requiredSections.length) * 12,
+      requiredHit >= requiredSections.length - 1,
+      Math.min(12, (requiredHit / Math.max(1, requiredSections.length - 1)) * 12),
       12,
-      `${requiredHit}/${requiredSections.length} required headings found. Missing: ${
+      `${requiredHit}/${requiredSections.length} core sections recognized (${sectionsFound.slice(0, 4).join(", ")}). Missing: ${
         requiredSections
-          .filter((s) => !s.re.test(text))
+          .filter((s) => !parsed.sections.some((sec) => sec.type === s.id))
           .map((s) => s.label)
           .join(", ") || "none"
       }`,
@@ -476,8 +632,8 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     check(
       "opt-sections",
       "Supporting sections (certs / achievements / summary)",
-      optionalHit >= 2,
-      Math.min(4, optionalHit * 1.4),
+      optionalHit >= 1,
+      Math.min(4, Math.max(2, optionalHit * 2)),
       4,
       `${optionalHit}/3 supporting sections present.`,
     ),
@@ -487,20 +643,19 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text),
       /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text) ? 4 : 0,
       4,
-      /(19|20)\d{2}/.test(text)
-        ? "Date ranges detected on entries."
-        : "No date ranges — ATS cannot build a timeline.",
+      /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text)
+        ? "Clear date ranges detected on experience entries."
+        : "Missing explicit date spans (e.g. '2023 - Present' or 'Jun 2022 - May 2024') on experience/education entries.",
     ),
   ];
-  if (requiredHit < requiredSections.length - 1) {
+  if (requiredHit < 3) {
     blockers.push(
-      "Multiple standard sections missing — keyword parsers will mis-file your content.",
+      "Multiple standard core sections missing — keyword parsers will mis-file your content.",
     );
   }
 
   /* --- 3. Impact & writing quality (25) --- */
   const quantRatio = bullets.length ? quantifiedBullets / bullets.length : 0;
-  const verbRatio = bullets.length ? actionVerbBullets / bullets.length : 0;
   const weakHits = containsAny(text, WEAK_PHRASES);
   const firstPerson = (text.match(/\b(I|my|me)\b/g) ?? []).length;
   const quantScore = Math.min(
@@ -510,6 +665,16 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       Math.min(10, (quantifiedBullets >= 2 ? 6 : quantifiedBullets * 3) + (hasProofOfWork ? 4 : 0)),
     ),
   );
+
+  const verbScore = Math.min(
+    6,
+    Math.max(
+      0,
+      ((parsed.powerVerbCount * 1.0 + parsed.standardVerbCount * 0.6) / Math.max(1, bullets.length * 0.7)) * 6 -
+        parsed.weakVerbBullets.length * 0.8,
+    ),
+  );
+
   const impact: AtsCheck[] = [
     check(
       "bullets",
@@ -517,7 +682,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       bullets.length >= 6,
       Math.min(5, bullets.length * 0.5),
       5,
-      `${bullets.length} bullet points detected.`,
+      `${bullets.length} bullet points detected across project & experience sections.`,
     ),
     check(
       "quantified",
@@ -532,10 +697,12 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     check(
       "verbs",
       "Bullets start with strong action verbs",
-      verbRatio >= 0.5,
-      Math.min(6, verbRatio * 10),
+      parsed.powerVerbCount >= 2 && parsed.weakVerbBullets.length === 0,
+      verbScore,
       6,
-      `${actionVerbBullets}/${bullets.length || 0} bullets open with action verbs.`,
+      parsed.weakVerbBullets.length > 0
+        ? `${parsed.powerVerbCount} power engineering verbs, but ${parsed.weakVerbBullets.length} passive phrase(s) detected (${parsed.weakVerbBullets.slice(0, 2).map((b) => '"' + b.slice(0, 30) + '…"').join(", ")}).`
+        : `${parsed.powerVerbCount} power engineering verbs and ${parsed.standardVerbCount} standard action verbs opening bullets.`,
     ),
     check(
       "weak",
@@ -558,6 +725,9 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   ];
 
   /* --- 4. Skills & architecture depth (20) --- */
+  const hasCustomJd = Boolean(jobDescription && jobDescription.trim().length >= 5);
+  const provenSkills = parsed.provenSkills;
+
   const highBarSignals = containsAny(text, [
     "distributed systems", "concurrency", "multithreading", "event-driven", "microservices",
     "kafka", "rabbitmq", "redis", "caching", "database indexing", "sharding", "connection pooling",
@@ -567,65 +737,124 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     "patent", "research paper", "pypi", "npm package", "open source",
   ]);
 
-  const skillChecks: AtsCheck[] = [
-    check(
-      "skill-count",
-      "Recognised technical keywords",
-      skillsFound.length >= 10,
-      Math.min(8, skillsFound.length * 0.6),
-      8,
-      `${skillsFound.length} known skills matched: ${skillsFound.slice(0, 10).join(", ")}${skillsFound.length > 10 ? "…" : ""}`,
-    ),
-    check(
-      "architecture-depth",
-      "Production architecture & Tier-1 SDE signals",
-      highBarSignals.length >= 2,
-      Math.min(6, Math.max(2, highBarSignals.length * 1.5)),
-      6,
-      highBarSignals.length > 0
-        ? `${highBarSignals.length} production architecture signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
-        : "No production architecture signals (Docker, Redis, microservices, concurrency, or packages) found.",
-    ),
-    check(
-      "tooling",
-      "Cloud / DevOps / testing tooling present",
-      containsAny(text, [
-        "aws",
-        "azure",
-        "gcp",
-        "docker",
-        "kubernetes",
-        "ci/cd",
-        "jenkins",
-        "github actions",
-        "pytest",
-        "jest",
-        "junit",
-        "terraform",
-        "git",
-      ]).length > 0,
-      Math.min(
-        6,
-        containsAny(text, [
-          "aws",
-          "azure",
-          "gcp",
-          "docker",
-          "kubernetes",
-          "ci/cd",
-          "jenkins",
-          "github actions",
-          "pytest",
-          "jest",
-          "junit",
-          "terraform",
-          "git",
-        ]).length * 1.5,
-      ),
-      6,
-      "Modern engineering tooling signals reliability to screeners.",
-    ),
-  ];
+  let kws: string[] = [];
+  let matched: string[] = [];
+  let missing: string[] = [];
+  let jdScore: number | null = null;
+
+  if (hasCustomJd) {
+    kws = jdKeywords(jobDescription!);
+    matched = kws.filter((k) => containsAny(text, [k]).length > 0);
+    missing = kws.filter((k) => !matched.includes(k));
+    // Accurate JD coverage: base ratio of required keywords matched + project proof bonus
+    const matchRatio = kws.length > 0 ? (matched.length / kws.length) : 1;
+    const bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
+    const bulletBonus = Math.min(12, bulletMatchedCount * 2.5);
+    jdScore = Math.min(100, Math.max(10, Math.round(matchRatio * 88 + bulletBonus)));
+  } else {
+    // Global SDE Benchmark: Realistic 0-100 evaluation of technical depth, stack versatility, and engineering impact
+    const skillBreadthScore = Math.min(40, skillsFound.length * 4); // Up to 40 pts for 10+ core technologies
+    const provenBulletScore = Math.min(30, (parsed.powerVerbCount * 4) + (quantifiedBullets * 5)); // Up to 30 pts for power action & quantified impact
+    const advancedSignalScore = Math.min(20, highBarSignals.length * 5); // Up to 20 pts for system design/advanced tech
+    const baselineBonus = hasProofOfWork ? 10 : 5; // 5-10 pts baseline & proof-of-work
+    jdScore = Math.min(98, Math.max(35, skillBreadthScore + provenBulletScore + advancedSignalScore + baselineBonus));
+    kws = skillsFound;
+    matched = skillsFound;
+    missing = []; // Do NOT fabricate arbitrary missing skills when no JD was provided
+  }
+
+  const skillChecks: AtsCheck[] = hasCustomJd
+    ? [
+        check(
+          "jd-skills",
+          "Target JD required skills & keywords match",
+          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)),
+          Math.min(10, kws.length ? (matched.length / Math.max(1, Math.min(15, kws.length))) * 10 : 10),
+          10,
+          `${matched.length}/${kws.length} JD keywords matched (${matched.slice(0, 8).join(", ")}${matched.length > 8 ? "…" : ""}). Missing: ${missing.slice(0, 5).join(", ") || "none"}.`,
+        ),
+        check(
+          "skill-count",
+          "Technical skills applied in project context",
+          provenSkills.length >= 2 || skillsFound.length >= 4,
+          Math.min(5, provenSkills.length * 1.5 + skillsFound.length * 0.4),
+          5,
+          provenSkills.length > 0
+            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 5).join(", ")}).`
+            : `${skillsFound.length} technical skills found across resume.`,
+        ),
+        check(
+          "architecture-depth",
+          "Target role tooling & engineering proof",
+          highBarSignals.length >= 1 || matched.length >= 4,
+          Math.min(5, Math.max(2, (highBarSignals.length + (matched.length >= 4 ? 2 : 0)) * 1.5)),
+          5,
+          highBarSignals.length > 0
+            ? `${highBarSignals.length} production signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
+            : "No production architecture signals detected.",
+        ),
+      ]
+    : [
+        check(
+          "skill-count",
+          "Technical skills verified in project bullets",
+          provenSkills.length >= 3 || skillsFound.length >= 6,
+          Math.min(8, provenSkills.length * 1.5 + Math.min(3, skillsFound.length * 0.4)),
+          8,
+          provenSkills.length > 0
+            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 6).join(", ")}) out of ${skillsFound.length} recognized tools.`
+            : `${skillsFound.length} skills listed, but none verified in project/work bullets. Integrate tools into project descriptions.`,
+        ),
+        check(
+          "architecture-depth",
+          "Production architecture & Tier-1 SDE signals",
+          highBarSignals.length >= 2,
+          Math.min(6, Math.max(2, highBarSignals.length * 1.5)),
+          6,
+          highBarSignals.length > 0
+            ? `${highBarSignals.length} production architecture signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
+            : "No production architecture signals (Docker, Redis, microservices, concurrency, or packages) found.",
+        ),
+        check(
+          "tooling",
+          "Cloud / DevOps / testing tooling present",
+          containsAny(text, [
+            "aws",
+            "azure",
+            "gcp",
+            "docker",
+            "kubernetes",
+            "ci/cd",
+            "jenkins",
+            "github actions",
+            "pytest",
+            "jest",
+            "junit",
+            "terraform",
+            "git",
+          ]).length > 0,
+          Math.min(
+            6,
+            containsAny(text, [
+              "aws",
+              "azure",
+              "gcp",
+              "docker",
+              "kubernetes",
+              "ci/cd",
+              "jenkins",
+              "github actions",
+              "pytest",
+              "jest",
+              "junit",
+              "terraform",
+              "git",
+            ]).length * 1.5,
+          ),
+          6,
+          "Modern engineering tooling signals reliability to screeners.",
+        ),
+      ];
 
   /* --- 5. Length & formatting hygiene (15) --- */
   const grammarAnalysis = analyzeGrammar(text);
@@ -697,64 +926,18 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     cat("parse", "ATS Parseability & Contact", parse, 20),
     cat("structure", "Section Structure", structureChecks, 20),
     cat("impact", "Impact & Writing Quality", impact, 25),
-    cat("skills", "Skills & Keyword Coverage", skillChecks, 20),
+    cat("skills", hasCustomJd ? "JD Skills & Competencies" : "Skills & Keyword Coverage", skillChecks, 20),
     cat("format", "Formatting Hygiene", fmt, 15),
   ];
 
   let score = Math.round(categories.reduce((s, c) => s + c.score, 0));
 
-  /* --- JD / Global SDE Core keyword match (deterministic) --- */
-  let jdScore: number | null = null;
-  let kws: string[] = [];
-  let matched: string[] = [];
-  let missing: string[] = [];
-  const hasCustomJd = Boolean(jobDescription && jobDescription.trim().length >= 5);
-
-  if (hasCustomJd) {
-    kws = jdKeywords(jobDescription!);
-    matched = kws.filter((k) => containsAny(text, [k]).length > 0);
-    missing = kws.filter((k) => !matched.includes(k));
-    jdScore = kws.length ? Math.round((matched.length / kws.length) * 100) : null;
-    if (jdScore !== null) {
-      score = Math.round(score * 0.7 + jdScore * 0.3);
-      if (jdScore < 35) {
-        blockers.push(`Only ${jdScore}% of job-description keywords appear in the resume.`);
-      }
+  /* --- Final JD score blending --- */
+  if (hasCustomJd && jdScore !== null) {
+    score = Math.round(score * 0.6 + jdScore * 0.4);
+    if (jdScore < 35) {
+      blockers.push(`Low JD alignment: only ${jdScore}% of required job description keywords found.`);
     }
-  } else {
-    // Global common baseline requirements for Software Development Engineer (SDE)
-    const GLOBAL_SDE_REQUIREMENTS = [
-      "python",
-      "java",
-      "javascript",
-      "typescript",
-      "c++",
-      "data structures",
-      "algorithms",
-      "oop",
-      "sql",
-      "postgresql",
-      "mysql",
-      "mongodb",
-      "react",
-      "node.js",
-      "express",
-      "django",
-      "fastapi",
-      "rest",
-      "api design",
-      "git",
-      "linux",
-      "docker",
-      "ci/cd",
-      "unit testing",
-      "system design",
-    ];
-    kws = GLOBAL_SDE_REQUIREMENTS;
-    matched = kws.filter((k) => containsAny(text, [k]).length > 0);
-    missing = kws.filter((k) => !matched.includes(k));
-    // SDE benchmark: matching 8-10 core competencies represents solid entry/mid SDE benchmark
-    jdScore = Math.min(100, Math.max(10, Math.round((matched.length / 8) * 100)));
   }
 
   const roleArc = classifyRoleArc(text);
@@ -782,6 +965,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       grammarErrorsList: grammarAnalysis.formattedList,
       roleArc: roleArc.arc,
       toolTaxonomy,
+      parsedDocument: parsed,
     },
     blockers,
     computedAt: new Date().toISOString(),

@@ -82,13 +82,15 @@ export async function saveAnalysisMongo(data: {
     // Ensure indexes exist for rapid ranking & lookup
     void Promise.allSettled([
       col.createIndex({ id: 1 }, { unique: true }),
+      col.createIndex({ file_name: 1 }),
       col.createIndex({ overall_score: -1 }),
       col.createIndex({ created_at: -1 }),
     ]);
 
     const now = new Date().toISOString();
+    const fileName = (data.fileName || "unknown.pdf").trim();
     const updatePayload = {
-      file_name: data.fileName || "unknown.pdf",
+      file_name: fileName,
       candidate_name: data.analysis.candidateName || "Unnamed candidate",
       role: data.analysis.role || "—",
       overall_score: typeof data.analysis.overallScore === "number" ? data.analysis.overallScore : 0,
@@ -102,8 +104,13 @@ export async function saveAnalysisMongo(data: {
       analysis: data.analysis,
     };
 
+    // Match by file_name first (case-insensitive) or id to prevent duplicate entries for the same resume
+    const matchFilter = fileName
+      ? { $or: [{ file_name: fileName }, { file_name: new RegExp(`^${fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }, { id: data.id }] }
+      : { id: data.id };
+
     await col.updateOne(
-      { id: data.id },
+      matchFilter,
       {
         $set: updatePayload,
         $setOnInsert: { id: data.id, created_at: now },
@@ -119,7 +126,7 @@ export async function saveAnalysisMongo(data: {
   }
 }
 
-/** Load all analysis records directly from MongoDB */
+/** Load all analysis records directly from MongoDB with strict file_name deduplication */
 export async function loadAnalysesMongo(): Promise<{
   success: boolean;
   items: Array<Omit<StoredMongoAnalysis, "_id">>;
@@ -130,12 +137,22 @@ export async function loadAnalysesMongo(): Promise<{
     const col = db.collection<StoredMongoAnalysis>("analyses");
     const docs = await col
       .find({})
-      .sort({ overall_score: -1, created_at: -1 })
+      .sort({ updated_at: -1, created_at: -1 })
       .limit(1000)
       .toArray();
 
+    // Deduplicate docs by file_name so each resume only ever appears once
+    const seenFiles = new Map<string, StoredMongoAnalysis>();
+    for (const d of docs) {
+      const key = (d.file_name || d.id || "").trim().toLowerCase();
+      if (!key) continue;
+      if (!seenFiles.has(key)) {
+        seenFiles.set(key, d);
+      }
+    }
+
     // Clean serialization mapping
-    const items = docs.map((d) => ({
+    const items = Array.from(seenFiles.values()).map((d) => ({
       id: d.id,
       file_name: d.file_name || "candidate.pdf",
       candidate_name: d.candidate_name || "Unnamed candidate",

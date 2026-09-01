@@ -432,29 +432,20 @@ export function detectAiTools(text: string): ToolTaxonomyResult {
   const hasGlobal = hits.some((h) => !h.domestic);
 
   const parts: string[] = [];
-  if (hasDomestic) {
-    const names = hits
-      .filter((h) => h.domestic)
-      .map((h) => h.name)
-      .slice(0, 4);
-    parts.push(`Domestic-AI (${names.join(", ")})`);
+  const names = hits.map((h) => h.name).slice(0, 5);
+  if (names.length) {
+    parts.push(`AI Stack (${names.join(", ")})`);
   }
-  if (hasGlobal) {
-    const names = hits
-      .filter((h) => !h.domestic)
-      .map((h) => h.name)
-      .slice(0, 4);
-    parts.push(`Global-AI (${names.join(", ")})`);
-  }
+
   const catLabel: Record<AiToolCategory, string> = {
-    "foundation-model": "Foundation models",
+    "foundation-model": "LLMs",
     "agent-framework": "Agent/RAG",
-    "vector-store": "Vector stores",
-    "inference-serving": "Local inference",
-    "gpu-orchestration": "GPU stacks",
-    "fine-tuning": "Fine-tuning",
+    "vector-store": "Vector DBs",
+    "inference-serving": "Local Inference",
+    "gpu-orchestration": "GPU Stacks",
+    "fine-tuning": "Fine-Tuning",
     multimodal: "Multimodal",
-    "ml-platform": "ML platforms",
+    "ml-platform": "ML Platforms",
   };
   for (const c of categories) parts.push(catLabel[c]);
 
@@ -463,6 +454,60 @@ export function detectAiTools(text: string): ToolTaxonomyResult {
     categories,
     hasDomestic,
     hasGlobal,
-    summary: parts.length ? parts.join(" + ") : "No GenAI tooling detected",
+    summary: parts.length ? parts.join(" · ") : "Standard Engineering Stack",
   };
+}
+
+/** Track-aware stack recommendations tailored to candidate's background */
+export function getTrackRecommendations(skillsFound: string[], text: string): string[] {
+  const l = (text ?? "").toLowerCase();
+  const lowerSkills = new Set(skillsFound.map((s) => s.toLowerCase()));
+
+  // 1. Frontend / Web
+  if (
+    l.includes("react") ||
+    l.includes("frontend") ||
+    l.includes("html") ||
+    l.includes("css") ||
+    l.includes("javascript") ||
+    l.includes("vue")
+  ) {
+    const pool = ["TypeScript", "Next.js", "Tailwind CSS", "Zustand", "Playwright", "Docker"];
+    return pool.filter((s) => !lowerSkills.has(s.toLowerCase())).slice(0, 3);
+  }
+
+  // 2. Python / AI / Data
+  if (
+    l.includes("python") ||
+    l.includes("machine learning") ||
+    l.includes("data science") ||
+    l.includes("django") ||
+    l.includes("fastapi")
+  ) {
+    const pool = ["FastAPI", "PostgreSQL", "Redis", "Docker", "Pytest", "Vector Search (FAISS)"];
+    return pool.filter((s) => !lowerSkills.has(s.toLowerCase())).slice(0, 3);
+  }
+
+  // 3. Java / Backend
+  if (l.includes("java") || l.includes("spring")) {
+    const pool = ["Spring Boot", "Microservices", "PostgreSQL", "Docker", "JUnit", "Redis"];
+    return pool.filter((s) => !lowerSkills.has(s.toLowerCase())).slice(0, 3);
+  }
+
+  // 4. Mobile
+  if (
+    l.includes("flutter") ||
+    l.includes("react native") ||
+    l.includes("android") ||
+    l.includes("ios") ||
+    l.includes("kotlin") ||
+    l.includes("swift")
+  ) {
+    const pool = ["State Management", "Firebase", "Offline Sync", "CI/CD Pipeline", "TypeScript"];
+    return pool.filter((s) => !lowerSkills.has(s.toLowerCase())).slice(0, 3);
+  }
+
+  // 5. Default General SDE
+  const pool = ["PostgreSQL", "Docker", "REST API Design", "Unit Testing", "Git"];
+  return pool.filter((s) => !lowerSkills.has(s.toLowerCase())).slice(0, 3);
 }
