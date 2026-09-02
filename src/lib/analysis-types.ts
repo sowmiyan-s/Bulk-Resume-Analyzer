@@ -517,8 +517,8 @@ function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
       ),
     },
     skills: {
-      score: clamp(num(pick(sklRaw, "score"), findScore("skills", 20, 25)), 0, 25),
-      max: 25,
+      score: clamp(num(pick(sklRaw, "score"), findScore("skills", 25, 30)), 0, 30),
+      max: 30,
       audit: str(
         pick(sklRaw, "audit", "critique", "assessment"),
         "Evaluated depth of modern frameworks, programming languages, database systems, and developer tooling.",
@@ -533,8 +533,8 @@ function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
       ),
     },
     projects: {
-      score: clamp(num(pick(prjRaw, "score"), findScore("project", 20, 25)), 0, 25),
-      max: 25,
+      score: clamp(num(pick(prjRaw, "score"), findScore("project", 28, 35)), 0, 35),
+      max: 35,
       audit: str(
         pick(prjRaw, "audit", "critique", "assessment"),
         "Evaluated project architecture complexity, API integrations, data modeling, and verifiable deployments.",
@@ -571,8 +571,8 @@ function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
       ),
     },
     certifications: {
-      score: clamp(num(pick(cerRaw, "score"), findScore("cert", 8, 10)), 0, 10),
-      max: 10,
+      score: clamp(num(pick(cerRaw, "score"), findScore("cert", 4, 5)), 0, 5),
+      max: 5,
       audit: str(
         pick(cerRaw, "audit", "critique", "assessment"),
         "Evaluated verifiable vendor/cloud accreditations (AWS, GCP, Azure, Oracle, Cisco, Kubernetes).",
@@ -584,8 +584,8 @@ function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
       verifiedCount: clamp(num(pick(cerRaw, "verified_count", "verifiedCount", "count"), 1), 0, 10),
     },
     achievements: {
-      score: clamp(num(pick(achRaw, "score"), findScore("achieve", 8, 10)), 0, 10),
-      max: 10,
+      score: clamp(num(pick(achRaw, "score"), findScore("achieve", 12, 15)), 0, 15),
+      max: 15,
       audit: str(
         pick(achRaw, "audit", "critique", "assessment"),
         "Evaluated hackathons, competitive programming ranks, tech awards, open-source PRs, and verifiable proof.",
@@ -665,8 +665,10 @@ export function normalizeAnalysis(
   const jdScoreNum =
     rawJdScore !== undefined && rawJdScore !== null ? clamp(num(rawJdScore)) : null;
   const sumBreakdown = breakdown.length >= 3 ? breakdown.reduce((acc, b) => acc + b.score, 0) : 0;
-  const explicitOverall = pick(o, "overall_score", "overallScore", "atsScore", "score");
-  const rawOverall =
+  const explicitOverall = pick(o, "overall_score", "overallScore", "score");
+  
+  // Authentic scoring: preserve the exact score evaluated by the model / section breakdown
+  const overallScore =
     explicitOverall !== undefined
       ? clamp(num(explicitOverall))
       : sumBreakdown > 0
@@ -675,16 +677,11 @@ export function normalizeAnalysis(
           ? jdScoreNum
           : 0;
 
-  // Hybrid Shortlisting Score: 70% Holistic Engineering & Proof-of-Work (AI/Recruiter Evaluation) + 30% ATS Layout & Hygiene Parseability
-  const overallScore = ats
-    ? clamp(Math.round(rawOverall * 0.70 + ats.score * 0.30))
-    : rawOverall;
-
   const finalJdScore =
-    ats?.jdScore !== null && ats?.jdScore !== undefined
-      ? ats.jdScore
-      : rawJdScore !== undefined && rawJdScore !== null
-        ? clamp(num(rawJdScore))
+    rawJdScore !== undefined && rawJdScore !== null
+      ? clamp(num(rawJdScore))
+      : ats?.jdScore !== null && ats?.jdScore !== undefined
+        ? ats.jdScore
         : clamp(Math.round(overallScore * 0.88));
 
   const inferredRole = str(
@@ -711,39 +708,27 @@ export function normalizeAnalysis(
       ? breakdown
       : [
           {
-            category: "Technical Skills Depth & Stack",
+            category: "Technical Skills Depth & Core Stack",
             score: sectionAudits.skills.score,
-            max: 25,
+            max: 30,
             note: sectionAudits.skills.audit,
           },
           {
-            category: "Project Complexity & Architecture",
+            category: "Project Complexity & Systems Architecture",
             score: sectionAudits.projects.score,
-            max: 25,
+            max: 35,
             note: sectionAudits.projects.audit,
           },
           {
-            category: "Internships & Practical Track Record (JD-Aligned)",
+            category: "Practical Track Record & Internships",
             score: sectionAudits.internships.score,
             max: 20,
             note: sectionAudits.internships.audit,
           },
           {
-            category: "Professional Summary & Career Positioning",
-            score: sectionAudits.summary.score,
-            max: 10,
-            note: sectionAudits.summary.audit,
-          },
-          {
-            category: "Verified Certifications & Accreditations",
-            score: sectionAudits.certifications.score,
-            max: 10,
-            note: sectionAudits.certifications.audit,
-          },
-          {
-            category: "Achievements, Hackathons & Verifiable Proof",
+            category: "Achievements, Verifiable Proof & Code Links",
             score: sectionAudits.achievements.score,
-            max: 10,
+            max: 15,
             note: sectionAudits.achievements.audit,
           },
         ];
@@ -763,27 +748,18 @@ export function normalizeAnalysis(
     rawModelName &&
     !rawModelName.toLowerCase().includes("unnamed") &&
     rawModelName.length >= 2 &&
-    !/^(candidate|resume|cv|document|profile)$/i.test(rawModelName.trim())
+    !/^(candidate|resume|cv|document|profile|career\s+objective|summary)$/i.test(rawModelName.trim())
       ? rawModelName
       : extractCandidateName(fallbackCleanText, fileName);
 
   const rawIssues = toIssues(pick(o, "critical_issues", "criticalIssues", "issues"));
   let criticalIssues = [...rawIssues];
 
-  // Synthesize concrete issues for any resume requiring overhaul / polish if issues array is empty
+  // Derive genuine readiness tier from the real score
   const hasHardBlockers = (ats?.blockers.length ?? 0) > 0;
-  const initialTier = toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore, hasHardBlockers);
+  const readinessTier = toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore, hasHardBlockers);
 
-  // Score calibration: Overhaul-required resumes or resumes with ATS hard blockers cannot score >= 65
-  let calibratedScore = overallScore;
-  if (initialTier === "Tier 3: Overhaul Required" || hasHardBlockers) {
-    calibratedScore = Math.min(64, calibratedScore);
-  } else if (initialTier === "Tier 2: Needs Minor Polish") {
-    calibratedScore = Math.min(79, calibratedScore);
-  }
-  const readinessTier = toTier(initialTier, calibratedScore, hasHardBlockers);
-
-  if (criticalIssues.length === 0 && (calibratedScore < 80 || hasHardBlockers)) {
+  if (criticalIssues.length === 0 && (overallScore < 80 || hasHardBlockers)) {
     // 1. Add ATS blockers
     if (ats?.blockers.length) {
       for (const b of ats.blockers) {
@@ -894,7 +870,7 @@ export function normalizeAnalysis(
   return {
     candidateName,
     role: str(pick(o, "role", "target_role", "targetRole", "title"), "—"),
-    overallScore: calibratedScore,
+    overallScore,
     readinessTier,
     scoreBreakdown: finalBreakdown,
     hrVerdict: str(pick(o, "hr_verdict", "hrVerdict", "verdict", "summary")),
@@ -997,7 +973,14 @@ export function createRuleBasedAnalysis(
   const role = activeJd ? "Target JD Role" : defaultRole || "Software Engineer (Entry Level)";
   const basis: "role-fit" | "jd-fit" = activeJd ? "jd-fit" : "role-fit";
   const hasHardBlockers = atsReport.blockers.length > 0;
-  const overallScore = hasHardBlockers ? Math.min(64, atsReport.score) : atsReport.score;
+  // Calibrate rule-based ATS format score: format-only checks without verified AI project architecture reasoning
+  // are scaled appropriately so superficial formatting doesn't outscore verified technical candidates.
+  const rawRuleScore = atsReport.score;
+  const calibratedScore = Math.min(
+    74,
+    Math.round(rawRuleScore * 0.72 + (atsReport.metrics.skillsFound.length >= 8 ? 8 : 4)),
+  );
+  const overallScore = hasHardBlockers ? Math.min(58, calibratedScore) : calibratedScore;
   const readinessTier = toTier(undefined, overallScore, hasHardBlockers);
 
   const finalBreakdown: ScoreRow[] = atsReport.categories.map((c) => ({

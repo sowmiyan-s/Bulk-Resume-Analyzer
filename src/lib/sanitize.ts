@@ -281,7 +281,7 @@ export function extractCandidateName(text?: string, fileName?: string): string {
 
       // Check if line looks like a person's name
       const isHeaderOrSection =
-        /^(curriculum\s+vitae|resume|cv|biodata|profile|contact|summary|objective|education|skills|experience|personal\s+details|name\s*[:\-])/i.test(
+        /^(career\s+objective|professional\s+summary|curriculum\s+vitae|resume|cv|biodata|profile|contact|summary|objective|education|skills|technical\s+skills|experience|work\s+experience|projects|academic\s+projects|personal\s+details|declaration|achievements|certifications|name\s*[:\-])/i.test(
           line,
         );
       const isContactLine =

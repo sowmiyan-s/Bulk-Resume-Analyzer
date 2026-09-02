@@ -152,7 +152,13 @@ export function MasterTable({
       if (!r || !r.analysis) return false;
       const score = effectiveScore(r.analysis);
 
-      if (onlyShortlisted && score < cutoff) return false;
+      const critCount =
+        (r.analysis.criticalIssues || []).filter((i) => i.severity === "critical").length +
+        (r.analysis.ats?.blockers || []).length;
+      const isOverhaul = (r.analysis.readinessTier || "").startsWith("Tier 3");
+      const isCandidateShortlisted = score >= cutoff && !isOverhaul && critCount === 0;
+
+      if (onlyShortlisted && !isCandidateShortlisted) return false;
 
       const tier = r.analysis.readinessTier || "";
       if (tierFilter !== "all" && !tier.startsWith(tierFilter)) return false;
@@ -175,13 +181,12 @@ export function MasterTable({
       );
     });
 
-
     const dir = asc ? 1 : -1;
     const cmp: Record<SortKey, (a: MasterRow, b: MasterRow) => number> = {
       rank: (a, b) => effectiveScore(b.analysis) - effectiveScore(a.analysis),
       score: (a, b) => effectiveScore(a.analysis) - effectiveScore(b.analysis),
       name: (a, b) =>
-        (a.analysis.candidateName || "").localeCompare(b.analysis.candidateName || ""),
+        (a.analysis.candidateName || "").localeCompare(a.analysis.candidateName || ""),
       file: (a, b) => (a.fileName || "").localeCompare(b.fileName || ""),
       tier: (a, b) =>
         (TIER_ORDER[a.analysis.readinessTier] ?? 99) - (TIER_ORDER[b.analysis.readinessTier] ?? 99),
@@ -202,7 +207,7 @@ export function MasterTable({
 
     list = [...list].sort((a, b) => cmp[sortKey](a, b) * dir);
     return list;
-  }, [rows, sortKey, asc, query, tierFilter]);
+  }, [uniqueRows, sortKey, asc, query, tierFilter, scoreFilter, onlyShortlisted, cutoff]);
 
   const toggle = (key: SortKey) => {
     if (key === sortKey) setAsc((v) => !v);

@@ -120,8 +120,8 @@ function Index() {
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
   const [ruleBasedOnly, setRuleBasedOnly] = useState(false);
-  const [cooldownSec, setCooldownSec] = useState(0);
-  const [concurrency, setConcurrency] = useState(10);
+  const [cooldownSec, setCooldownSec] = useState(1);
+  const [concurrency, setConcurrency] = useState(3);
   const [maxRetries, setMaxRetries] = useState(3);
   const [running, setRunning] = useState(false);
   const [shortlistCutoff, setShortlistCutoff] = useState<number>(75);
@@ -473,7 +473,7 @@ function Index() {
           settings.modelId.toLowerCase().includes("reasoning") ||
           settings.modelId.toLowerCase().includes("gpt-5") ||
           settings.modelId.toLowerCase().includes("deepseek");
-        const timeoutMs = isDeepReasoning ? 35000 : 25000;
+        const timeoutMs = isDeepReasoning ? 45000 : 35000;
 
         const timeoutController = new AbortController();
         const timeoutId = setTimeout(() => {
@@ -507,12 +507,16 @@ function Index() {
         return normalized;
       } catch (err: unknown) {
         if (signal?.aborted) throw err;
+        // If we haven't exhausted auto-retries, propagate error so queue retries with backoff
+        if (attempt < maxRetries) {
+          throw err;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
-          `[analyzeOne] LLM delayed or failed for ${item.file.name} (${msg}). Completing instantly with High-Precision Deterministic Engine.`,
+          `[analyzeOne] LLM delayed or failed for ${item.file.name} after ${attempt} attempt(s) (${msg}). Completing with High-Precision Deterministic Engine.`,
         );
         toast.info(
-          `AI response delayed for ${item.file.name} — completed using High-Precision Deterministic Engine.`,
+          `AI evaluation unavailable for ${item.file.name} — fallback applied with calibrated engine.`,
         );
         return createRuleBasedAnalysis(
           atsReport,
@@ -525,7 +529,7 @@ function Index() {
         clearInterval(timer);
       }
     },
-    [patch, settings, useJd, jd, ruleBasedOnly],
+    [patch, settings, useJd, jd, ruleBasedOnly, maxRetries],
   );
 
   const runBatch = useCallback(() => {
