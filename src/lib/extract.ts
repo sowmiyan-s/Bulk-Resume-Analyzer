@@ -31,12 +31,20 @@ function isJunk(path: string) {
   return path.startsWith("__MACOSX") || base.startsWith(".") || base === "";
 }
 
+const MAX_SINGLE_FILE_BYTES = 15 * 1024 * 1024; // 15 MB per file
+const MAX_TOTAL_BATCH_BYTES = 150 * 1024 * 1024; // 150 MB batch limit
+
 /** Expands uploaded files: zips are unpacked, everything else passes through. */
 export async function collectFiles(files: File[]): Promise<ExtractedFile[]> {
   const { unzipSync } = await import("fflate");
   const out: ExtractedFile[] = [];
+  let totalBytes = 0;
 
   for (const file of files) {
+    if (file.size > MAX_SINGLE_FILE_BYTES) {
+      throw new Error(`File '${file.name}' exceeds the 15MB size limit (${Math.round(file.size / (1024 * 1024))}MB).`);
+    }
+
     const isZip = file.name.toLowerCase().endsWith(".zip");
     const buf = new Uint8Array(await file.arrayBuffer());
 
@@ -44,10 +52,17 @@ export async function collectFiles(files: File[]): Promise<ExtractedFile[]> {
       const entries = unzipSync(buf);
       for (const [path, bytes] of Object.entries(entries)) {
         if (isJunk(path) || bytes.length === 0) continue;
+        if (bytes.length > MAX_SINGLE_FILE_BYTES) continue;
+        totalBytes += bytes.length;
         out.push({ name: path, bytes, kind: classify(path) });
       }
     } else {
+      totalBytes += buf.length;
       out.push({ name: file.name, bytes: buf, kind: classify(file.name) });
+    }
+
+    if (totalBytes > MAX_TOTAL_BATCH_BYTES) {
+      throw new Error(`Batch total size exceeds 150MB limit.`);
     }
   }
 
@@ -80,6 +95,20 @@ async function getOcrWorker(): Promise<TesseractWorker> {
     })();
   }
   return ocrWorkerPromise;
+}
+
+/** Terminate Tesseract worker to free Web Worker memory when batch completes */
+export async function terminateOcrWorker(): Promise<void> {
+  if (ocrWorkerPromise) {
+    try {
+      const worker = await ocrWorkerPromise;
+      await worker.terminate();
+    } catch {
+      /* ignore */
+    } finally {
+      ocrWorkerPromise = null;
+    }
+  }
 }
 
 /* ----------------------------- PDF Extraction ----------------------------- */

@@ -658,13 +658,20 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   const quantRatio = bullets.length ? quantifiedBullets / bullets.length : 0;
   const weakHits = containsAny(text, WEAK_PHRASES);
   const firstPerson = (text.match(/\b(I|my|me)\b/g) ?? []).length;
-  const quantScore = Math.min(
-    10,
-    Math.max(
-      quantRatio * 20,
-      Math.min(10, (quantifiedBullets >= 2 ? 6 : quantifiedBullets * 3) + (hasProofOfWork ? 4 : 0)),
-    ),
-  );
+
+  // Qualification & Measurable Impact:
+  // Overwhelmed resumes (e.g. >15 bullets with <15% metrics) get heavily penalized for lack of verifiable proof
+  let quantScore = 0;
+  if (bullets.length === 0) {
+    quantScore = 0;
+  } else if (bullets.length <= 6) {
+    quantScore = Math.min(10, quantifiedBullets * 4 + (hasProofOfWork ? 2 : 0));
+  } else {
+    // Standard / High-bullet resume: ratio drives the score
+    const baseRatioScore = Math.min(8, Math.round(quantRatio * 22));
+    const bonusProof = hasProofOfWork ? 2 : 0;
+    quantScore = Math.min(10, Math.max(1, baseRatioScore + bonusProof));
+  }
 
   const verbScore = Math.min(
     6,
@@ -687,12 +694,12 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     check(
       "quantified",
       "Quantified achievements & verifiable proof",
-      quantRatio >= 0.35 || (quantifiedBullets >= 2 && hasProofOfWork),
+      quantRatio >= 0.25 || (bullets.length <= 6 && quantifiedBullets >= 2 && hasProofOfWork),
       quantScore,
       10,
       hasProofOfWork
-        ? `${quantifiedBullets}/${bullets.length || 0} bullets with metrics + verifiable published artifacts/proof.`
-        : `${quantifiedBullets}/${bullets.length || 0} bullets contain measurable outcomes.`,
+        ? `${quantifiedBullets}/${bullets.length || 0} bullets with metrics (${Math.round(quantRatio * 100)}% density) + verifiable published artifacts/proof.`
+        : `${quantifiedBullets}/${bullets.length || 0} bullets contain measurable outcomes (${Math.round(quantRatio * 100)}% density).`,
     ),
     check(
       "verbs",
@@ -727,6 +734,10 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   /* --- 4. Skills & architecture depth (20) --- */
   const hasCustomJd = Boolean(jobDescription && jobDescription.trim().length >= 5);
   const provenSkills = parsed.provenSkills;
+  const isKeywordStuffed = skillsFound.length >= 12 && provenSkills.length <= 2;
+  if (isKeywordStuffed) {
+    blockers.push(`Keyword stuffing detected: ${skillsFound.length} technical skills listed, but only ${provenSkills.length} applied in project bullets.`);
+  }
 
   const highBarSignals = containsAny(text, [
     "distributed systems", "concurrency", "multithreading", "event-driven", "microservices",
@@ -753,11 +764,14 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     jdScore = Math.min(100, Math.max(10, Math.round(matchRatio * 88 + bulletBonus)));
   } else {
     // Global SDE Benchmark: Realistic 0-100 evaluation of technical depth, stack versatility, and engineering impact
-    const skillBreadthScore = Math.min(40, skillsFound.length * 4); // Up to 40 pts for 10+ core technologies
-    const provenBulletScore = Math.min(30, (parsed.powerVerbCount * 4) + (quantifiedBullets * 5)); // Up to 30 pts for power action & quantified impact
-    const advancedSignalScore = Math.min(20, highBarSignals.length * 5); // Up to 20 pts for system design/advanced tech
-    const baselineBonus = hasProofOfWork ? 10 : 5; // 5-10 pts baseline & proof-of-work
-    jdScore = Math.min(98, Math.max(35, skillBreadthScore + provenBulletScore + advancedSignalScore + baselineBonus));
+    const provenSkillScore = Math.min(25, provenSkills.length * 4);
+    const listedSkillScore = isKeywordStuffed ? 4 : Math.min(15, skillsFound.length * 1.5);
+    const skillBreadthScore = provenSkillScore + listedSkillScore;
+    const provenBulletScore = Math.min(30, (parsed.powerVerbCount * 3) + Math.round(quantRatio * 40));
+    const advancedSignalScore = Math.min(20, highBarSignals.length * 4);
+    const baselineBonus = hasProofOfWork ? 10 : 5;
+    const rawJd = skillBreadthScore + provenBulletScore + advancedSignalScore + baselineBonus;
+    jdScore = Math.min(98, Math.max(25, isKeywordStuffed ? rawJd - 15 : rawJd));
     kws = skillsFound;
     matched = skillsFound;
     missing = []; // Do NOT fabricate arbitrary missing skills when no JD was provided
@@ -798,11 +812,11 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "skill-count",
           "Technical skills verified in project bullets",
-          provenSkills.length >= 3 || skillsFound.length >= 6,
-          Math.min(8, provenSkills.length * 1.5 + Math.min(3, skillsFound.length * 0.4)),
+          provenSkills.length >= 3 && !isKeywordStuffed,
+          Math.min(8, provenSkills.length * 1.8 + (isKeywordStuffed ? 0 : Math.min(2, skillsFound.length * 0.2))),
           8,
           provenSkills.length > 0
-            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 6).join(", ")}) out of ${skillsFound.length} recognized tools.`
+            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 6).join(", ")}) out of ${skillsFound.length} recognized tools.${isKeywordStuffed ? " Overwhelmed skills list without project proof." : ""}`
             : `${skillsFound.length} skills listed, but none verified in project/work bullets. Integrate tools into project descriptions.`,
         ),
         check(
@@ -859,6 +873,10 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   /* --- 5. Length & formatting hygiene (15) --- */
   const grammarAnalysis = analyzeGrammar(text);
   const tooLong = longestBulletWords > 45;
+  const overwhelmedBullets = bullets.length > 20 && quantRatio < 0.15;
+  if (overwhelmedBullets) {
+    blockers.push(`Overwhelmed structure: ${bullets.length} bullets with only ${Math.round(quantRatio * 100)}% quantified outcomes. Uncalibrated text triggers recruiter fatigue.`);
+  }
   const hasTableChars = /\|\s*\S+\s*\|/.test(text);
   const specialGlyphs = (text.match(/[^\x00-\x7F\u2018\u2019\u201c\u201d\u2013\u2014•₹]/g) ?? [])
     .length;
@@ -937,6 +955,20 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     score = Math.round(score * 0.6 + jdScore * 0.4);
     if (jdScore < 35) {
       blockers.push(`Low JD alignment: only ${jdScore}% of required job description keywords found.`);
+    }
+  }
+
+  /* --- Hard Blockers & Structural Overhaul Penalties --- */
+  if (blockers.length > 0) {
+    const penalty = Math.min(30, blockers.length * 10);
+    score = Math.max(20, score - penalty);
+    // Candidates with severe blockers (overwhelmed bullets, keyword stuffing, 45+ word bullet, missing core sections)
+    // CANNOT pass as Tier 1 or high Tier 2. Their score is capped at 64 (Tier 3 Overhaul Required).
+    const isSevere = blockers.length >= 2 || tooLong || !hasEmail || requiredHit < 3 || isKeywordStuffed;
+    if (isSevere) {
+      score = Math.min(64, score);
+    } else {
+      score = Math.min(74, score);
     }
   }
 

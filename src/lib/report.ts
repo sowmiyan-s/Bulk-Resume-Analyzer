@@ -72,7 +72,7 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-  const M = 40;
+  const M = 36;
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const BODY = W - M * 2;
@@ -80,48 +80,67 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   const score = effectiveScore(a);
   const tone: [number, number, number] =
-    score >= 75 ? [16, 149, 103] : score >= 55 ? [217, 119, 6] : [220, 38, 38];
+    score >= 80 ? [16, 149, 103] : score >= 65 ? [217, 119, 6] : [220, 38, 38];
   const [tr, tg, tb] = tone;
+
+  // Sanitize any non-ASCII characters that corrupt in standard jsPDF Helvetica
+  const clean = (s: string): string => {
+    if (!s) return "";
+    return s
+      .replace(/[–—]/g, "-")
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/→/g, "->")
+      .replace(/•/g, "-")
+      .replace(/…/g, "...")
+      .replace(/[^\x20-\x7E\n\r]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
 
   const drawPageHeader = (pageNum: number) => {
     if (pageNum > 1) {
       doc.setFillColor(248, 250, 252).rect(0, 0, W, 36, "F");
       doc.setDrawColor(226, 232, 240).setLineWidth(0.8).line(0, 36, W, 36);
       doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
-      doc.text(`${a.candidateName || "Candidate"} — Placement Audit Report`, M, 22);
+      doc.text(`${clean(a.candidateName) || "Candidate"} - Placement Audit Report`, M, 22);
       doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(148, 163, 184);
       doc.text(`Score: ${score}/100`, W - M, 22, { align: "right" });
     }
   };
 
-  const ensure = (needed = 20) => {
-    if (y + needed > H - M - 20) {
+  // Safe pagination: ensures at least 'needed' vertical pt is available on current page
+  const ensure = (needed = 24) => {
+    if (y + needed > H - M - 24) {
       doc.addPage();
       drawPageHeader(doc.getNumberOfPages());
       y = 52;
     }
   };
 
-  const heading = (title: string, needed = 28) => {
+  // Section heading with high needed margin (65pt) to avoid orphaned headings at bottom of page
+  const heading = (title: string, needed = 65) => {
     ensure(needed);
-    doc.setFillColor(241, 245, 249).rect(M, y, BODY, 18, "F");
-    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 23, 42);
-    doc.text(title.toUpperCase(), M + 8, y + 13);
-    y += 24;
+    doc.setFillColor(241, 245, 249).roundedRect(M, y, BODY, 19, 3, 3, "F");
+    doc.setDrawColor(203, 213, 225).setLineWidth(0.6).roundedRect(M, y, BODY, 19, 3, 3, "S");
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(15, 23, 42);
+    doc.text(clean(title).toUpperCase(), M + 8, y + 13);
+    y += 26;
   };
 
   const textBlock = (
     s: string,
-    size = 9,
+    size = 8.5,
     style: "normal" | "bold" | "italic" = "normal",
     color: [number, number, number] = [51, 65, 85],
     indent = 0,
   ) => {
     if (!s) return;
+    const sanitized = clean(s);
     doc.setFont("helvetica", style).setFontSize(size).setTextColor(color[0], color[1], color[2]);
-    const lines = doc.splitTextToSize(s, BODY - indent) as string[];
+    const lines = doc.splitTextToSize(sanitized, BODY - indent) as string[];
     for (const line of lines) {
-      ensure(size + 6);
+      ensure(size + 5);
       doc.text(line, M + indent, y);
       y += size + 4;
     }
@@ -129,20 +148,20 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   const bulletList = (items: string[], indent = 12) => {
     if (!items.length) {
-      textBlock("None reported.", 9, "italic", [148, 163, 184], indent);
+      textBlock("None reported.", 8.5, "italic", [148, 163, 184], indent);
       return;
     }
     for (const item of items) {
       if (!item) continue;
-      ensure(18);
-      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(tr, tg, tb);
-      doc.text("\u2022", M + indent, y);
-      doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(51, 65, 85);
-      const lines = doc.splitTextToSize(item, BODY - indent - 14) as string[];
+      const sanitized = clean(item);
+      ensure(16);
+      doc.setFillColor(tr, tg, tb).circle(M + indent + 2, y - 3, 1.8, "F");
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(51, 65, 85);
+      const lines = doc.splitTextToSize(sanitized, BODY - indent - 14) as string[];
       lines.forEach((line, i) => {
-        if (i > 0) ensure(14);
-        doc.text(line, M + indent + 12, y);
-        y += 13;
+        if (i > 0) ensure(13);
+        doc.text(line, M + indent + 10, y);
+        y += 12;
       });
       y += 2;
     }
@@ -153,10 +172,10 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   // Candidate Name & Role
   doc.setFont("helvetica", "bold").setFontSize(18).setTextColor(255, 255, 255);
-  doc.text(a.candidateName || "Unnamed Candidate", M, 36);
+  doc.text(clean(a.candidateName) || "Unnamed Candidate", M, 36);
 
-  doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(203, 213, 225);
-  doc.text(`${a.role || "Software Engineering"} · ${fileName}`, M, 54);
+  doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(203, 213, 225);
+  doc.text(`${clean(a.role) || "Software Engineering"} - ${clean(fileName)}`, M, 54);
 
   doc.setFontSize(8).setTextColor(148, 163, 184);
   const evalDate = new Date().toLocaleDateString(undefined, {
@@ -164,7 +183,7 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     month: "short",
     day: "numeric",
   });
-  doc.text(`Placement Evaluation · Generated ${evalDate}`, M, 70);
+  doc.text(`Placement Evaluation - Generated ${evalDate}`, M, 70);
 
   // Evaluation basis pill in header
   if (a.evaluationBasis) {
@@ -172,15 +191,16 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
       a.evaluationBasis === "jd-fit"
         ? `JD-Aligned Assessment`
         : `Global SDE Standard Benchmark`;
-    doc.setFillColor(30, 41, 59).roundedRect(M, 80, 190, 14, 3, 3, "F");
+    doc.setFillColor(30, 41, 59).roundedRect(M, 79, 190, 15, 3, 3, "F");
     doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(148, 163, 184);
     doc.text(basisText, M + 8, 90);
   }
 
   // Right Score Card in Header
-  const scoreBoxW = 100;
+  const scoreBoxW = 104;
   const scoreBoxX = W - M - scoreBoxW;
   doc.setFillColor(30, 41, 59).roundedRect(scoreBoxX, 18, scoreBoxW, 72, 6, 6, "F");
+  doc.setDrawColor(51, 65, 85).setLineWidth(0.6).roundedRect(scoreBoxX, 18, scoreBoxW, 72, 6, 6, "S");
 
   doc.setFont("helvetica", "bold").setFontSize(26).setTextColor(tr, tg, tb);
   doc.text(String(score), scoreBoxX + scoreBoxW / 2, 48, { align: "center" });
@@ -200,56 +220,101 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     { align: "center" },
   );
 
-  y = 120;
+  y = 118;
 
   // Tier Badge Bar
-  doc.setFillColor(score >= 75 ? 240 : score >= 55 ? 254 : 254, score >= 75 ? 253 : score >= 55 ? 243 : 242, score >= 75 ? 244 : score >= 55 ? 199 : 242).roundedRect(M, y, BODY, 24, 4, 4, "F");
+  doc.setFillColor(score >= 80 ? 240 : score >= 65 ? 254 : 254, score >= 80 ? 253 : score >= 65 ? 243 : 242, score >= 80 ? 244 : score >= 65 ? 199 : 242).roundedRect(M, y, BODY, 24, 4, 4, "F");
   doc.setDrawColor(tr, tg, tb).setLineWidth(0.8).roundedRect(M, y, BODY, 24, 4, 4, "S");
-  doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(tr, tg, tb);
-  doc.text(a.readinessTier, M + 12, y + 16);
+  doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor(tr, tg, tb);
+  doc.text(clean(a.readinessTier), M + 12, y + 16);
   if (a.manualScore !== null) {
-    doc.setFont("helvetica", "italic").setFontSize(8).setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "italic").setFontSize(7.5).setTextColor(100, 116, 139);
     doc.text(`(Manual Override Applied: AI Score ${a.overallScore})`, W - M - 12, y + 16, { align: "right" });
   }
-  y += 34;
+  y += 32;
+
+  // ================= 1B. CRITICAL ATS & AI PARSING ADVISORY =================
+  ensure(60);
+  const advBg: [number, number, number] = [255, 251, 235]; // Warm gold tint
+  const advBorder: [number, number, number] = [245, 158, 11];
+  const advText: [number, number, number] = [120, 53, 15];
+
+  const advP1 = "NOTICE: If this report marks sections or skills as missing that actually exist in your resume, your document's text layer is unreadable by automated AI & ATS parsers.";
+  const advP2 = "Resumes built with graphic tools (Canva, Figma, Photoshop, multi-column tables) frequently fail automated text extraction. To ensure 100% parsing accuracy, export your resume using clean code-to-PDF or a standard LaTeX template (e.g. Overleaf / Jake's Resume) rather than graphical canvas templates.";
+  
+  const advP1Lines = doc.splitTextToSize(advP1, BODY - 26) as string[];
+  const advP2Lines = doc.splitTextToSize(advP2, BODY - 26) as string[];
+  const advH = 20 + advP1Lines.length * 9.5 + advP2Lines.length * 9.5 + 8;
+
+  doc.setFillColor(advBg[0], advBg[1], advBg[2]).roundedRect(M, y, BODY, advH, 4, 4, "F");
+  doc.setDrawColor(advBorder[0], advBorder[1], advBorder[2]).setLineWidth(0.6).roundedRect(M, y, BODY, advH, 4, 4, "S");
+  // Left accent bar
+  doc.setFillColor(advBorder[0], advBorder[1], advBorder[2]).roundedRect(M, y, 4, advH, 2, 2, "F");
+
+  // Warning Header
+  doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(advText[0], advText[1], advText[2]);
+  doc.text("[!] CRITICAL ATS & AI MACHINE-READABILITY ADVISORY", M + 12, y + 12);
+
+  let advY = y + 23;
+  doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(146, 64, 14);
+  advP1Lines.forEach((l) => {
+    doc.text(l, M + 12, advY);
+    advY += 9.5;
+  });
+  advY += 2;
+  doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(120, 53, 15);
+  advP2Lines.forEach((l) => {
+    doc.text(l, M + 12, advY);
+    advY += 9.5;
+  });
+
+  y += advH + 10;
 
   // ================= 2. RECRUITER & HR VERDICTS =================
   if (a.recruiterFirstImpression || a.hrVerdict) {
-    heading("Recruiter & Placement Committee Verdict");
+    heading("Recruiter & Placement Committee Verdict", 65);
     if (a.recruiterFirstImpression) {
-      ensure(38);
-      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, 32, 4, 4, "F");
-      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, 32, 4, 4, "S");
-      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
-      doc.text("6-SECOND RECRUITER SCAN:", M + 10, y + 13);
-      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
-      const impLines = doc.splitTextToSize(a.recruiterFirstImpression, BODY - 20) as string[];
-      doc.text(impLines[0] || "", M + 10, y + 25);
-      y += 38;
+      const impClean = clean(a.recruiterFirstImpression);
+      const impLines = doc.splitTextToSize(impClean, BODY - 20) as string[];
+      const impH = Math.max(30, impLines.length * 11 + 18);
+      ensure(impH + 4);
+      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, impH, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, impH, 4, 4, "S");
+      doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(71, 85, 105);
+      doc.text("6-SECOND RECRUITER SCAN:", M + 10, y + 12);
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(30, 41, 59);
+      impLines.forEach((line, idx) => {
+        doc.text(line, M + 10, y + 23 + idx * 11);
+      });
+      y += impH + 6;
     }
     if (a.hrVerdict) {
-      ensure(38);
-      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, 32, 4, 4, "F");
-      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, 32, 4, 4, "S");
-      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(71, 85, 105);
-      doc.text("PLACEMENT VERDICT & HIRING RECOMMENDATION:", M + 10, y + 13);
-      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
-      const vLines = doc.splitTextToSize(a.hrVerdict, BODY - 20) as string[];
-      doc.text(vLines[0] || "", M + 10, y + 25);
-      y += 38;
+      const vClean = clean(a.hrVerdict);
+      const vLines = doc.splitTextToSize(vClean, BODY - 20) as string[];
+      const vH = Math.max(30, vLines.length * 11 + 18);
+      ensure(vH + 4);
+      doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, vH, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, vH, 4, 4, "S");
+      doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(71, 85, 105);
+      doc.text("PLACEMENT VERDICT & HIRING RECOMMENDATION:", M + 10, y + 12);
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(30, 41, 59);
+      vLines.forEach((line, idx) => {
+        doc.text(line, M + 10, y + 23 + idx * 11);
+      });
+      y += vH + 8;
     }
   }
 
   // ================= 3. DETERMINISTIC ATS METRICS GRID =================
   if (a.ats) {
-    heading("ATS Engine Audit & Technical Metrics");
+    heading("ATS Engine Audit & Technical Metrics", 75);
     const m = a.ats.metrics;
 
     // 4 metric cards
-    ensure(42);
+    ensure(44);
     const cardW = (BODY - 24) / 4;
     const cards = [
-      { label: "Word Count", val: `${m.words} words`, sub: `≈ ${m.estimatedPages} page(s)` },
+      { label: "Word Count", val: `${m.words} words`, sub: `approx. ${m.estimatedPages} page(s)` },
       { label: "Bullet Points", val: `${m.bullets}`, sub: `avg ${m.readabilityWordsPerBullet} w/bullet` },
       { label: "Quantified Impact", val: `${m.quantifiedBullets}/${m.bullets || 1}`, sub: `${m.bullets ? Math.round((m.quantifiedBullets / m.bullets) * 100) : 0}% measurable` },
       { label: "Action Verbs", val: `${m.actionVerbBullets}/${m.bullets || 1}`, sub: `${m.bullets ? Math.round((m.actionVerbBullets / m.bullets) * 100) : 0}% strong starts` },
@@ -259,9 +324,9 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
       const cx = M + idx * (cardW + 8);
       doc.setFillColor(248, 250, 252).roundedRect(cx, y, cardW, 36, 4, 4, "F");
       doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(cx, y, cardW, 36, 4, 4, "S");
-      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(100, 116, 139);
       doc.text(c.label.toUpperCase(), cx + 8, y + 11);
-      doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor(15, 23, 42);
       doc.text(c.val, cx + 8, y + 23);
       doc.setFont("helvetica", "normal").setFontSize(7).setTextColor(148, 163, 184);
       doc.text(c.sub, cx + 8, y + 32);
@@ -272,32 +337,35 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     for (const cat of a.ats.categories) {
       ensure(22);
       const catPct = cat.max > 0 ? Math.max(0, Math.min(1, cat.score / cat.max)) : 0;
-      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(51, 65, 85);
-      doc.text(cat.label, M, y);
+      doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(51, 65, 85);
+      doc.text(clean(cat.label), M, y);
       doc.text(`${cat.score}/${cat.max} pts`, M + BODY, y, { align: "right" });
       y += 5;
 
       doc.setFillColor(226, 232, 240).roundedRect(M, y, BODY, 4, 2, 2, "F");
       const cTone: [number, number, number] =
         catPct >= 0.75 ? [16, 149, 103] : catPct >= 0.5 ? [217, 119, 6] : [220, 38, 38];
-      doc.setFillColor(cTone[0], cTone[1], cTone[2]).roundedRect(M, y, BODY * catPct, 4, 2, 2, "F");
+      doc.setFillColor(cTone[0], cTone[1], cTone[2]).roundedRect(M, y, Math.max(2, BODY * catPct), 4, 2, 2, "F");
       y += 12;
     }
+    y += 4;
   }
 
   // ================= 4. CRITICAL ISSUES & BLOCKERS =================
   if (a.criticalIssues.length || (a.ats?.blockers && a.ats.blockers.length > 0)) {
-    heading("Identified Resume Mistakes & Critical Blockers");
+    heading("Identified Resume Mistakes & Critical Blockers", 80);
 
     if (a.ats?.blockers && a.ats.blockers.length > 0) {
       for (const b of a.ats.blockers) {
-        const bLines = doc.splitTextToSize(b, BODY - 130) as string[];
+        const bClean = clean(b);
+        const bLines = doc.splitTextToSize(bClean, BODY - 130) as string[];
         const blockH = Math.max(22, bLines.length * 11 + 10);
         ensure(blockH + 4);
         doc.setFillColor(254, 242, 242).roundedRect(M, y, BODY, blockH, 3, 3, "F");
         doc.setDrawColor(254, 202, 202).setLineWidth(0.5).roundedRect(M, y, BODY, blockH, 3, 3, "S");
+        doc.setFillColor(220, 38, 38).roundedRect(M, y, 3.5, blockH, 2, 2, "F");
         doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(220, 38, 38);
-        doc.text("⚠️ ATS HARD BLOCKER:", M + 8, y + 13);
+        doc.text("[!] ATS HARD BLOCKER:", M + 8, y + 13);
         doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(127, 29, 29);
         bLines.forEach((line, idx) => {
           doc.text(line, M + 120, y + 13 + idx * 11);
@@ -312,19 +380,21 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
       const badgeBg: [number, number, number] = isCrit ? [254, 242, 242] : isMaj ? [254, 243, 199] : [241, 245, 249];
       const badgeText: [number, number, number] = isCrit ? [220, 38, 38] : isMaj ? [180, 83, 9] : [71, 85, 105];
 
-      const pLines = doc.splitTextToSize(issue.problem, BODY - 24) as string[];
-      const evLines = issue.evidence ? (doc.splitTextToSize(`Evidence: "${issue.evidence}"`, BODY - 24) as string[]) : [];
-      const fixLines = issue.fix ? (doc.splitTextToSize(`Actionable Fix: ${issue.fix}`, BODY - 24) as string[]) : [];
+      const pLines = doc.splitTextToSize(clean(issue.problem), BODY - 24) as string[];
+      const evLines = issue.evidence ? (doc.splitTextToSize(`Evidence: "${clean(issue.evidence)}"`, BODY - 24) as string[]) : [];
+      const fixLines = issue.fix ? (doc.splitTextToSize(`Actionable Fix: ${clean(issue.fix)}`, BODY - 24) as string[]) : [];
 
       const cardH = 20 + pLines.length * 11 + (evLines.length ? evLines.length * 10 + 3 : 0) + (fixLines.length ? fixLines.length * 11 + 3 : 0) + 6;
       ensure(cardH + 4);
 
       doc.setFillColor(badgeBg[0], badgeBg[1], badgeBg[2]).roundedRect(M, y, BODY, cardH, 4, 4, "F");
       doc.setDrawColor(badgeText[0], badgeText[1], badgeText[2]).setLineWidth(0.5).roundedRect(M, y, BODY, cardH, 4, 4, "S");
+      // Left accent line
+      doc.setFillColor(badgeText[0], badgeText[1], badgeText[2]).roundedRect(M, y, 3.5, cardH, 2, 2, "F");
 
       // Severity & Area Header
       doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(badgeText[0], badgeText[1], badgeText[2]);
-      doc.text(`[${issue.severity.toUpperCase()}] ${issue.area}`, M + 10, y + 13);
+      doc.text(`[${issue.severity.toUpperCase()}] ${clean(issue.area)}`, M + 10, y + 13);
 
       let textY = y + 25;
 
@@ -361,17 +431,18 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   // ================= 5. GRAMMAR, TYPO & PHRASING AUDIT =================
   if (a.grammarAndOcrErrors.length) {
-    heading("Grammar, Spelling & Phrasing Mistakes");
+    heading("Grammar, Spelling & Phrasing Mistakes", 70);
     for (const g of a.grammarAndOcrErrors) {
-      const gLines = doc.splitTextToSize(g, BODY - 28) as string[];
+      const gClean = clean(g);
+      const gLines = doc.splitTextToSize(gClean, BODY - 28) as string[];
       const gH = Math.max(22, gLines.length * 11 + 12);
       ensure(gH + 4);
 
       doc.setFillColor(248, 250, 252).roundedRect(M, y, BODY, gH, 3, 3, "F");
       doc.setDrawColor(226, 232, 240).setLineWidth(0.5).roundedRect(M, y, BODY, gH, 3, 3, "S");
 
-      doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(217, 119, 6);
-      doc.text("•", M + 8, y + 13);
+      // Draw vector dot indicator
+      doc.setFillColor(217, 119, 6).circle(M + 10, y + 10, 2.5, "F");
 
       doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(30, 41, 59);
       gLines.forEach((line, idx) => {
@@ -384,21 +455,23 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   // ================= 6. ATS FORMATTING & PARSING GLITCHES =================
   if (a.formattingProblems.length) {
-    heading("ATS Layout & Formatting Anomalies");
+    heading("ATS Layout & Formatting Anomalies", 70);
     for (const f of a.formattingProblems) {
-      const fLines = doc.splitTextToSize(f, BODY - 28) as string[];
+      const fClean = clean(f);
+      const fLines = doc.splitTextToSize(fClean, BODY - 28) as string[];
       const fH = Math.max(20, fLines.length * 11 + 10);
       ensure(fH + 4);
 
       doc.setFillColor(254, 242, 242).roundedRect(M, y, BODY, fH, 3, 3, "F");
       doc.setDrawColor(254, 202, 202).setLineWidth(0.5).roundedRect(M, y, BODY, fH, 3, 3, "S");
+      doc.setFillColor(220, 38, 38).roundedRect(M, y, 3, fH, 1.5, 1.5, "F");
 
       doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(220, 38, 38);
-      doc.text("!", M + 8, y + 13);
+      doc.text("[!]", M + 7, y + 13);
 
       doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(127, 29, 29);
       fLines.forEach((line, idx) => {
-        doc.text(line, M + 18, y + 13 + idx * 11);
+        doc.text(line, M + 22, y + 13 + idx * 11);
       });
 
       y += fH + 4;
@@ -406,42 +479,45 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
   }
 
   // ================= 7. SKILL MATRIX & TECH STACK =================
-  heading("Technical Skills & Placement Gap Analysis");
+  heading("Technical Skills & Placement Gap Analysis", 70);
 
   if (a.skillMatrix.matched.length) {
-    ensure(20);
+    ensure(24);
+    doc.setFillColor(16, 149, 103).circle(M + 4, y - 3, 2.5, "F");
     doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(16, 149, 103);
-    doc.text("✓ Verified Technical Skills Found in Resume:", M, y);
+    doc.text("[+] Verified Technical Skills Found in Resume:", M + 10, y);
     y += 12;
-    textBlock(a.skillMatrix.matched.join(" · "), 8.5, "normal", [51, 65, 85], 10);
+    textBlock(clean(a.skillMatrix.matched.join(" - ")), 8.5, "normal", [51, 65, 85], 10);
     y += 4;
   }
 
   if (a.skillMatrix.missing.length) {
-    ensure(20);
+    ensure(24);
+    doc.setFillColor(220, 38, 38).circle(M + 4, y - 3, 2.5, "F");
     doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(220, 38, 38);
-    doc.text("✗ Missing Target Role / JD Keywords:", M, y);
+    doc.text("[-] Missing Target Role / JD Keywords:", M + 10, y);
     y += 12;
-    textBlock(a.skillMatrix.missing.join(" · "), 8.5, "normal", [127, 29, 29], 10);
+    textBlock(clean(a.skillMatrix.missing.join(" - ")), 8.5, "normal", [127, 29, 29], 10);
     y += 4;
   }
 
   if (a.skillMatrix.recommended.length) {
-    ensure(20);
+    ensure(24);
+    doc.setFillColor(217, 119, 6).circle(M + 4, y - 3, 2.5, "F");
     doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(217, 119, 6);
-    doc.text("⚡ Highest Placement Impact Skills to Acquire Next:", M, y);
+    doc.text("[>] Highest Placement Impact Skills to Acquire Next:", M + 10, y);
     y += 12;
-    textBlock(a.skillMatrix.recommended.join(" · "), 8.5, "normal", [120, 53, 15], 10);
+    textBlock(clean(a.skillMatrix.recommended.join(" - ")), 8.5, "normal", [120, 53, 15], 10);
     y += 6;
   }
 
   // ================= 8. BULLET REWRITES =================
   if (a.bulletRewrites.length) {
-    heading("Actionable Bullet Point Transformations");
+    heading("Actionable Bullet Point Transformations", 80);
     for (const r of a.bulletRewrites) {
-      const bLines = doc.splitTextToSize(r.original, BODY - 110) as string[];
-      const aLines = doc.splitTextToSize(r.rewritten, BODY - 110) as string[];
-      const rLines = r.reason ? (doc.splitTextToSize(`Why: ${r.reason}`, BODY - 20) as string[]) : [];
+      const bLines = doc.splitTextToSize(clean(r.original), BODY - 110) as string[];
+      const aLines = doc.splitTextToSize(clean(r.rewritten), BODY - 110) as string[];
+      const rLines = r.reason ? (doc.splitTextToSize(`Why: ${clean(r.reason)}`, BODY - 20) as string[]) : [];
 
       const rwH = 26 + bLines.length * 11 + aLines.length * 12 + (rLines.length ? rLines.length * 10 + 4 : 0);
       ensure(rwH + 4);
@@ -453,19 +529,19 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
       // Before
       doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(220, 38, 38);
-      doc.text("BEFORE (WEAK):", M + 10, curY);
+      doc.text("[-] BEFORE (WEAK):", M + 10, curY);
       doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(100, 116, 139);
       bLines.forEach((line, idx) => {
-        doc.text(line, M + 95, curY + idx * 11);
+        doc.text(line, M + 110, curY + idx * 11);
       });
       curY += Math.max(16, bLines.length * 11 + 4);
 
       // After
       doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(16, 149, 103);
-      doc.text("AFTER (IMPACT):", M + 10, curY);
+      doc.text("[+] AFTER (IMPACT):", M + 10, curY);
       doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(15, 23, 42);
       aLines.forEach((line, idx) => {
-        doc.text(line, M + 95, curY + idx * 11);
+        doc.text(line, M + 110, curY + idx * 11);
       });
       curY += Math.max(16, aLines.length * 11 + 4);
 
@@ -483,16 +559,16 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
 
   // ================= 9. IMPROVEMENT PLAN & SUGGESTIONS =================
   if (a.techImprovementIdeas.length || a.projectSuggestions.length) {
-    heading("Placement Enhancement Roadmap");
+    heading("Placement Enhancement Roadmap", 70);
     if (a.techImprovementIdeas.length) {
-      ensure(16);
+      ensure(18);
       doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(30, 41, 59);
       doc.text("Key Technical Upgrades:", M, y);
       y += 12;
       bulletList(a.techImprovementIdeas, 8);
     }
     if (a.projectSuggestions.length) {
-      ensure(16);
+      ensure(18);
       doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(30, 41, 59);
       doc.text("Recommended Portfolio Projects:", M, y);
       y += 12;
@@ -506,7 +582,7 @@ export async function exportScorecardPdf(fileName: string, a: Analysis) {
     doc.setPage(p);
     doc.setDrawColor(226, 232, 240).setLineWidth(0.5).line(M, H - 28, W - M, H - 28);
     doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(148, 163, 184);
-    doc.text("Placement Screening Cell · AI & Deterministic Resume Audit", M, H - 16);
+    doc.text("Placement Screening Cell - AI & Deterministic Resume Audit", M, H - 16);
     doc.text(`Page ${p} of ${totalPages}`, W - M, H - 16, { align: "right" });
   }
 

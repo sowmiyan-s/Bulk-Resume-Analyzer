@@ -41,28 +41,77 @@ export interface AdminSystemSettings {
   updatedAt?: string;
 }
 
-const DEFAULT_ADMIN_PASS = "123321";
+import crypto from "crypto";
 
 export function checkAdminPassword(providedPass?: string): boolean {
   if (!providedPass) return false;
   const p = providedPass.trim();
   const envPass =
-    (typeof process !== "undefined" &&
-      process.env &&
-      (process.env["ADMIN_PASSWORD"] || process.env["VITE_ADMIN_PASSWORD"])) ||
-    DEFAULT_ADMIN_PASS;
-  return Boolean(envPass && p === envPass.trim());
+    typeof process !== "undefined" && process.env
+      ? (process.env["ADMIN_PASSWORD"] || process.env["VITE_ADMIN_PASSWORD"])?.trim()
+      : undefined;
+  if (!envPass) return false;
+  return p === envPass;
 }
 
 function maskSecret(key?: string): string {
   if (!key || typeof key !== "string") return "";
-  const trimmed = key.trim();
+  const trimmed = decryptSecret(key.trim());
   if (trimmed.length <= 8) return "••••••••";
   return `${trimmed.slice(0, 4)}••••••••${trimmed.slice(-4)}`;
 }
 
 function isMasked(key?: string): boolean {
   return typeof key === "string" && key.includes("••••");
+}
+
+const ENCRYPTION_PREFIX = "enc::";
+
+function getEncryptionKey(): Buffer {
+  const secret =
+    (typeof process !== "undefined" && process.env && (process.env["ENCRYPTION_SECRET"] || process.env["ADMIN_PASSWORD"])) ||
+    "resume-radiance-default-key-32b-str";
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+export function encryptSecret(plainText?: string): string {
+  if (!plainText || typeof plainText !== "string" || !plainText.trim()) return "";
+  const trimmed = plainText.trim();
+  if (trimmed.startsWith(ENCRYPTION_PREFIX) || isMasked(trimmed)) return trimmed;
+
+  try {
+    const key = getEncryptionKey();
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    let encrypted = cipher.update(trimmed, "utf8", "hex");
+    encrypted += cipher.final("hex");
+    const authTag = cipher.getAuthTag().toString("hex");
+    return `${ENCRYPTION_PREFIX}${iv.toString("hex")}:${authTag}:${encrypted}`;
+  } catch {
+    return trimmed;
+  }
+}
+
+export function decryptSecret(cipherText?: string): string {
+  if (!cipherText || typeof cipherText !== "string" || !cipherText.trim()) return "";
+  const trimmed = cipherText.trim();
+  if (!trimmed.startsWith(ENCRYPTION_PREFIX)) return trimmed;
+
+  try {
+    const key = getEncryptionKey();
+    const parts = trimmed.slice(ENCRYPTION_PREFIX.length).split(":");
+    if (parts.length !== 3) return trimmed;
+    const iv = Buffer.from(parts[0]!, "hex");
+    const authTag = Buffer.from(parts[1]!, "hex");
+    const encryptedText = parts[2]!;
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedText, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch {
+    return trimmed;
+  }
 }
 
 /* ------------------------------- Pure Database Operations ------------------------------- */
@@ -248,22 +297,22 @@ export async function saveAdminSettings(data: {
     };
 
     if (data.settings.qwenApiKey !== undefined && !isMasked(data.settings.qwenApiKey)) {
-      updateData["qwenApiKey"] = data.settings.qwenApiKey.trim();
+      updateData["qwenApiKey"] = encryptSecret(data.settings.qwenApiKey.trim());
     }
     if (data.settings.groqApiKey !== undefined && !isMasked(data.settings.groqApiKey)) {
-      updateData["groqApiKey"] = data.settings.groqApiKey.trim();
+      updateData["groqApiKey"] = encryptSecret(data.settings.groqApiKey.trim());
     }
     if (data.settings.cerebrasApiKey !== undefined && !isMasked(data.settings.cerebrasApiKey)) {
-      updateData["cerebrasApiKey"] = data.settings.cerebrasApiKey.trim();
+      updateData["cerebrasApiKey"] = encryptSecret(data.settings.cerebrasApiKey.trim());
     }
     if (data.settings.openrouterApiKey !== undefined && !isMasked(data.settings.openrouterApiKey)) {
-      updateData["openrouterApiKey"] = data.settings.openrouterApiKey.trim();
+      updateData["openrouterApiKey"] = encryptSecret(data.settings.openrouterApiKey.trim());
     }
     if (data.settings.nvidiaApiKey !== undefined && !isMasked(data.settings.nvidiaApiKey)) {
-      updateData["nvidiaApiKey"] = data.settings.nvidiaApiKey.trim();
+      updateData["nvidiaApiKey"] = encryptSecret(data.settings.nvidiaApiKey.trim());
     }
     if (data.settings.geminiApiKey !== undefined && !isMasked(data.settings.geminiApiKey)) {
-      updateData["geminiApiKey"] = data.settings.geminiApiKey.trim();
+      updateData["geminiApiKey"] = encryptSecret(data.settings.geminiApiKey.trim());
     }
     if (data.settings.defaultRole !== undefined) {
       updateData["defaultRole"] = data.settings.defaultRole.trim();
@@ -308,42 +357,42 @@ export async function getAdminSettings(data: { passcode: string }): Promise<{
     const ping = await pingMongo();
 
     const qwenKey =
-      (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["qwenApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])) ||
       "";
 
     const groqKey =
-      (config?.["groqApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["groqApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])) ||
       "";
 
     const cerebrasKey =
-      (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["cerebrasApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])) ||
       "";
 
     const openrouterKey =
-      (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["openrouterApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])) ||
       "";
 
     const nvidiaKey =
-      (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["nvidiaApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])) ||
       "";
 
     const geminiKey =
-      (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["geminiApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])) ||
@@ -413,42 +462,42 @@ export async function getPublicSystemInfo(): Promise<{
     const config = await col.findOne({ key: "global_config" });
 
     const hasServerQwenKey = Boolean(
-      (config?.["qwenApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["qwenApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])?.trim())),
     );
 
     const hasServerGroqKey = Boolean(
-      (config?.["groqApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["groqApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])?.trim())),
     );
 
     const hasServerCerebrasKey = Boolean(
-      (config?.["cerebrasApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["cerebrasApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])?.trim())),
     );
 
     const hasServerOpenRouterKey = Boolean(
-      (config?.["openrouterApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["openrouterApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])?.trim())),
     );
 
     const hasServerNvidiaKey = Boolean(
-      (config?.["nvidiaApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["nvidiaApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])?.trim())),
     );
 
     const hasServerGeminiKey = Boolean(
-      (config?.["geminiApiKey"] as string | undefined)?.trim() ||
+      decryptSecret((config?.["geminiApiKey"] as string | undefined)?.trim()) ||
       (typeof process !== "undefined" &&
         process.env &&
         ((process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim())),

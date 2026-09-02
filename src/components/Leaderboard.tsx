@@ -119,7 +119,15 @@ export function Leaderboard({
   }, [rows]);
 
   const shortlistedCount = useMemo(() => {
-    return uniqueRows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
+    return uniqueRows.filter((r) => {
+      const a = r.analysis;
+      const score = effectiveScore(a);
+      const isOverhaul = a.readinessTier.startsWith("Tier 3");
+      const critCount =
+        (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
+        (a.ats?.blockers || []).length;
+      return score >= cutoff && !isOverhaul && critCount === 0;
+    }).length;
   }, [uniqueRows, cutoff]);
 
   const tierCounts = useMemo(
@@ -574,7 +582,6 @@ export function Leaderboard({
               {sorted.map((row, index) => {
                 const a = row.analysis;
                 const score = effectiveScore(a);
-                const isShortlisted = score >= cutoff;
                 const isSelected = selectedIds.has(row.id);
                 const critIssuesCount = (a.criticalIssues || []).length;
                 const formattingCount = (a.formattingProblems || []).length;
@@ -583,6 +590,8 @@ export function Leaderboard({
                 const critical =
                   (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
                   (a.ats?.blockers || []).length;
+                const isShortlisted =
+                  score >= cutoff && !a.readinessTier.startsWith("Tier 3") && critical === 0;
                 return (
                   <TableRow
                     key={row.id}

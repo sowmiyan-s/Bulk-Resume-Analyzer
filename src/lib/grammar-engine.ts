@@ -705,11 +705,7 @@ export function analyzeGrammar(text: string): {
     issues.push(...tenseIssues.slice(0, MAX_ISSUES - issues.length));
   }
 
-  // 6. CAPITALIZATION AUDIT
-  if (issues.length < MAX_ISSUES) {
-    const capIssues = detectCapitalizationErrors(lines);
-    issues.push(...capIssues.slice(0, MAX_ISSUES - issues.length));
-  }
+  // (Capitalization audit intentionally skipped per user specification: focus solely on true spelling, typos, and syntax)
 
   // Format list for display and exports
   const formattedList = issues.map(

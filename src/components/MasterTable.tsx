@@ -114,7 +114,15 @@ export function MasterTable({
   }, [rows]);
 
   const shortlistedCount = useMemo(() => {
-    return uniqueRows.filter((r) => effectiveScore(r.analysis) >= cutoff).length;
+    return uniqueRows.filter((r) => {
+      const a = r.analysis;
+      const score = effectiveScore(a);
+      const isOverhaul = a.readinessTier.startsWith("Tier 3");
+      const critCount =
+        (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
+        (a.ats?.blockers || []).length;
+      return score >= cutoff && !isOverhaul && critCount === 0;
+    }).length;
   }, [uniqueRows, cutoff]);
 
   const tierCounts = useMemo(() => {
@@ -576,7 +584,6 @@ export function MasterTable({
               {sorted.map((row, index) => {
                 const a = row.analysis;
                 const score = effectiveScore(a);
-                const isShortlisted = score >= cutoff;
                 const critIssuesCount = (a.criticalIssues || []).length;
                 const formattingCount = (a.formattingProblems || []).length;
                 const grammarCount = (a.grammarAndOcrErrors || []).length;
@@ -584,6 +591,8 @@ export function MasterTable({
                 const critical =
                   (a.criticalIssues || []).filter((i) => i.severity === "critical").length +
                   (a.ats?.blockers || []).length;
+                const isShortlisted =
+                  score >= cutoff && !a.readinessTier.startsWith("Tier 3") && critical === 0;
                 const isSelected = selectedIds.has(row.id);
 
                 return (
@@ -635,6 +644,14 @@ export function MasterTable({
                             title={`Candidate meets custom shortlist threshold of ${cutoff}%`}
                           >
                             🎯 Shortlist
+                          </span>
+                        )}
+                        {a.isRuleBasedFallback && (
+                          <span
+                            className="inline-flex items-center text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20"
+                            title="Analyzed with High-Precision Deterministic Engine"
+                          >
+                            ⚡ Rule-Based
                           </span>
                         )}
                       </div>

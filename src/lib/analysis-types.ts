@@ -317,6 +317,8 @@ export type Analysis = {
 
   /* ---- Deterministic Rule-Based ATS Engine Report ---- */
   ats: AtsReport | null;
+  /** True when AI call timed out/failed or rule-based only mode was selected. */
+  isRuleBasedFallback?: boolean;
 };
 
 /* ------------------------------- coercion ------------------------------- */
@@ -614,6 +616,17 @@ function toSectionImprovements(v: unknown): SectionImprovement[] {
     .filter((s) => s.currentGap || s.actionableFix);
 }
 
+// Formatting & Grammar error filters — Filter out URLs, GitHub/LinkedIn links, emails, and capitalization checks
+const isLinkOrEmailPattern = (s: string) =>
+  /(?:https?:\/\/|www\.|github\.com|linkedin\.com|gitlab\.com|leetcode\.com|@|\.(?:dev|io|app|com|in|org)\b)/i.test(
+    s,
+  );
+
+const isCapitalizationOrCasing = (s: string) =>
+  /\[capitalization\]|\b(?:casing|capitalize|capitalization|uppercase|lowercase pronoun|brand casing)\b/i.test(
+    s,
+  );
+
 export function normalizeAnalysis(
   raw: unknown,
   atsReport?: AtsReport | null,
@@ -759,9 +772,18 @@ export function normalizeAnalysis(
 
   // Synthesize concrete issues for any resume requiring overhaul / polish if issues array is empty
   const hasHardBlockers = (ats?.blockers.length ?? 0) > 0;
-  const readinessTier = toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore, hasHardBlockers);
+  const initialTier = toTier(pick(o, "readiness_tier", "readinessTier", "tier"), overallScore, hasHardBlockers);
 
-  if (criticalIssues.length === 0 && (overallScore < 80 || hasHardBlockers)) {
+  // Score calibration: Overhaul-required resumes or resumes with ATS hard blockers cannot score >= 65
+  let calibratedScore = overallScore;
+  if (initialTier === "Tier 3: Overhaul Required" || hasHardBlockers) {
+    calibratedScore = Math.min(64, calibratedScore);
+  } else if (initialTier === "Tier 2: Needs Minor Polish") {
+    calibratedScore = Math.min(79, calibratedScore);
+  }
+  const readinessTier = toTier(initialTier, calibratedScore, hasHardBlockers);
+
+  if (criticalIssues.length === 0 && (calibratedScore < 80 || hasHardBlockers)) {
     // 1. Add ATS blockers
     if (ats?.blockers.length) {
       for (const b of ats.blockers) {
@@ -825,16 +847,11 @@ export function normalizeAnalysis(
     }
   }
 
-  // Formatting & Grammar errors — Filter out URLs, GitHub/LinkedIn links, and emails
-  const isLinkOrEmailPattern = (s: string) =>
-    /(?:https?:\/\/|www\.|github\.com|linkedin\.com|gitlab\.com|leetcode\.com|@|\.(?:dev|io|app|com|in|org)\b)/i.test(
-      s,
-    );
-
+  // Formatting & Grammar errors — Filter out URLs, GitHub/LinkedIn links, emails, and capitalization checks
   const rawGrammar = strArr(pick(o, "grammar_and_ocr_errors", "grammarAndOcrErrors", "grammar_errors"))
-    .filter((g) => !isLinkOrEmailPattern(g));
+    .filter((g) => !isLinkOrEmailPattern(g) && !isCapitalizationOrCasing(g));
   const atsGrammar = (ats?.metrics.grammarErrorsList ?? [])
-    .filter((g) => !isLinkOrEmailPattern(g));
+    .filter((g) => !isLinkOrEmailPattern(g) && !isCapitalizationOrCasing(g));
 
   const seenGrammar = new Set<string>();
   const mergedGrammar: string[] = [];
@@ -861,11 +878,9 @@ export function normalizeAnalysis(
     }
   }
 
-  const cleanMatched = Array.from(
-    new Set(matchedSkills.length ? matchedSkills : sectionAudits.skills.matchedKeywords),
-  );
+  const cleanMatched = Array.from(new Set(matchedSkills.filter(Boolean)));
   const cleanMissing = Array.from(
-    new Set(missingSkills.length ? missingSkills : sectionAudits.skills.missingCriticalSkills),
+    new Set(missingSkills.filter((s) => !cleanMatched.includes(s))),
   );
   const cleanRecommended = Array.from(
     new Set(
@@ -879,7 +894,7 @@ export function normalizeAnalysis(
   return {
     candidateName,
     role: str(pick(o, "role", "target_role", "targetRole", "title"), "—"),
-    overallScore,
+    overallScore: calibratedScore,
     readinessTier,
     scoreBreakdown: finalBreakdown,
     hrVerdict: str(pick(o, "hr_verdict", "hrVerdict", "verdict", "summary")),
@@ -981,8 +996,8 @@ export function createRuleBasedAnalysis(
 
   const role = activeJd ? "Target JD Role" : defaultRole || "Software Engineer (Entry Level)";
   const basis: "role-fit" | "jd-fit" = activeJd ? "jd-fit" : "role-fit";
-  const overallScore = atsReport.score;
   const hasHardBlockers = atsReport.blockers.length > 0;
+  const overallScore = hasHardBlockers ? Math.min(64, atsReport.score) : atsReport.score;
   const readinessTier = toTier(undefined, overallScore, hasHardBlockers);
 
   const finalBreakdown: ScoreRow[] = atsReport.categories.map((c) => ({
@@ -1158,7 +1173,9 @@ export function createRuleBasedAnalysis(
       .map(convertAtsCheckToIssue),
   ];
 
-  const grammarAndOcrErrors = atsReport.metrics.grammarErrorsList ?? [];
+  const grammarAndOcrErrors = (atsReport.metrics.grammarErrorsList ?? []).filter(
+    (g) => !isLinkOrEmailPattern(g) && !isCapitalizationOrCasing(g),
+  );
   const formattingProblems = atsReport.categories
     .find((c) => c.id === "format")
     ?.checks.filter((k) => !k.passed && k.id !== "grammar")
@@ -1307,6 +1324,7 @@ export function createRuleBasedAnalysis(
       tools: atsReport.metrics.toolTaxonomy.hits.map((h) => h.name),
     },
     ats: atsReport,
+    isRuleBasedFallback: true,
   };
 }
 

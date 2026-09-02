@@ -65,9 +65,19 @@ function writeLocal(rows: StoredAnalysis[]) {
   memoryCache = rows;
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(LS_KEY, JSON.stringify(rows.slice(-500)));
+    const trimmed = rows.slice(-100).map((r) => ({
+      ...r,
+      raw_text: r.raw_text ? r.raw_text.slice(0, 1000) : "",
+      clean_text: r.clean_text ? r.clean_text.slice(0, 1000) : "",
+    }));
+    window.localStorage.setItem(LS_KEY, JSON.stringify(trimmed));
   } catch {
-    /* quota — keep the most recent 500 */
+    try {
+      const compact = rows.slice(-30).map((r) => ({ ...r, raw_text: "", clean_text: "" }));
+      window.localStorage.setItem(LS_KEY, JSON.stringify(compact));
+    } catch {
+      /* quota fallback */
+    }
   }
 }
 

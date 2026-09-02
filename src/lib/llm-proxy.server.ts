@@ -38,23 +38,24 @@ async function loadVaultKeys(): Promise<ProviderVaultKeys> {
     const db = await getDb();
     const config = await db.collection("system_settings").findOne({ key: "global_config" });
     if (config) {
+      const { decryptSecret } = await import("./database.server");
       if (typeof config["qwenApiKey"] === "string" && config["qwenApiKey"].trim()) {
-        keys.qwen = config["qwenApiKey"].trim();
+        keys.qwen = decryptSecret(config["qwenApiKey"].trim());
       }
       if (typeof config["groqApiKey"] === "string" && config["groqApiKey"].trim()) {
-        keys.groq = config["groqApiKey"].trim();
+        keys.groq = decryptSecret(config["groqApiKey"].trim());
       }
       if (typeof config["cerebrasApiKey"] === "string" && config["cerebrasApiKey"].trim()) {
-        keys.cerebras = config["cerebrasApiKey"].trim();
+        keys.cerebras = decryptSecret(config["cerebrasApiKey"].trim());
       }
       if (typeof config["openrouterApiKey"] === "string" && config["openrouterApiKey"].trim()) {
-        keys.openrouter = config["openrouterApiKey"].trim();
+        keys.openrouter = decryptSecret(config["openrouterApiKey"].trim());
       }
       if (typeof config["nvidiaApiKey"] === "string" && config["nvidiaApiKey"].trim()) {
-        keys.nvidia = config["nvidiaApiKey"].trim();
+        keys.nvidia = decryptSecret(config["nvidiaApiKey"].trim());
       }
       if (typeof config["geminiApiKey"] === "string" && config["geminiApiKey"].trim()) {
-        keys.gemini = config["geminiApiKey"].trim();
+        keys.gemini = decryptSecret(config["geminiApiKey"].trim());
       }
     }
   } catch (e) {

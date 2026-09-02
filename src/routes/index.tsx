@@ -36,7 +36,7 @@ import {
   type Analysis,
 } from "@/lib/analysis-types";
 import { runAtsEngine, atsFactSheet, type AtsReport } from "@/lib/ats-engine";
-import { collectFiles, extractText, type ExtractedFile } from "@/lib/extract";
+import { collectFiles, extractText, terminateOcrWorker, type ExtractedFile } from "@/lib/extract";
 import { LlmError, callModel, DEFAULT_SETTINGS, type LlmSettings } from "@/lib/llm";
 import { findModel } from "@/lib/models";
 import { RateLimitedQueue } from "@/lib/queue";
@@ -327,10 +327,10 @@ function Index() {
         });
 
         // High-concurrency pooled pre-extraction: extract up to 10 files in parallel for 50 resumes
-        let queueIndex = 0;
+        const pendingWork = [...freshItems];
         const poolWorker = async () => {
-          while (queueIndex < freshItems.length) {
-            const item = freshItems[queueIndex++];
+          while (pendingWork.length > 0) {
+            const item = pendingWork.shift();
             if (!item) break;
             try {
               const raw = await extractText(item.file);
@@ -467,10 +467,18 @@ function Index() {
       const atsFacts = atsFactSheet(atsReport);
 
       try {
+        const activeM = findModel(settings.modelId);
+        const isDeepReasoning =
+          activeM?.tag === "Deep Reasoning" ||
+          settings.modelId.toLowerCase().includes("reasoning") ||
+          settings.modelId.toLowerCase().includes("gpt-5") ||
+          settings.modelId.toLowerCase().includes("deepseek");
+        const timeoutMs = isDeepReasoning ? 35000 : 25000;
+
         const timeoutController = new AbortController();
         const timeoutId = setTimeout(() => {
           timeoutController.abort();
-        }, 12000);
+        }, timeoutMs);
 
         const onAbort = () => timeoutController.abort();
         signal?.addEventListener("abort", onAbort);
@@ -502,6 +510,9 @@ function Index() {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
           `[analyzeOne] LLM delayed or failed for ${item.file.name} (${msg}). Completing instantly with High-Precision Deterministic Engine.`,
+        );
+        toast.info(
+          `AI response delayed for ${item.file.name} — completed using High-Precision Deterministic Engine.`,
         );
         return createRuleBasedAnalysis(
           atsReport,
@@ -605,6 +616,7 @@ function Index() {
         onIdle: () => {
           setRunning(false);
           setCooldownLeft(0);
+          void terminateOcrWorker();
           toast.success("Batch complete.");
         },
       },
@@ -692,7 +704,15 @@ function Index() {
       ? Math.round(done.reduce((s, i) => s + effectiveScore(i.analysis!), 0) / done.length)
       : 0;
     const tier1 = done.filter((i) => i.analysis!.readinessTier.startsWith("Tier 1")).length;
-    const shortlisted = done.filter((i) => effectiveScore(i.analysis!) >= shortlistCutoff).length;
+    const shortlisted = done.filter((i) => {
+      const a = i.analysis!;
+      const score = effectiveScore(a);
+      const isOverhaul = a.readinessTier.startsWith("Tier 3");
+      const critCount =
+        (a.criticalIssues || []).filter((iss) => iss.severity === "critical").length +
+        (a.ats?.blockers || []).length;
+      return score >= shortlistCutoff && !isOverhaul && critCount === 0;
+    }).length;
     return {
       total: cleanItems.length,
       done: done.length,

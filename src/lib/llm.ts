@@ -101,7 +101,7 @@ recruiter_first_impression:string (<=35 words: objective technical assessment ba
 hr_verdict:string (<=45 words: clear, unbiased hiring recommendation based on verified skills)
 strengths:[string] max 3 (top technical competencies, e.g. 'Production backend with FastAPI & Docker', 'Multi-agent AI implementation')
 critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] 1-5 concrete technical gaps, missing core sections, unquantified bullets, or ATS red flags. For any score below 80, you MUST provide explicit critical/major issues detailing what needs fixing. Return [] only if resume is 100% flawless.
-grammar_and_ocr_errors:[string] List genuine grammatical errors, typos, spelling mistakes, repeated words, and punctuation errors. Format each as: '"<incorrect text>" -> "<corrected text>" (<brief explanation>)'. IMPORTANT: NEVER flag URLs, GitHub links, LinkedIn handles, portfolio links, or email addresses as grammar/spelling errors. Return [] if clean.
+grammar_and_ocr_errors:[string] List genuine grammatical errors, typos, and misspelled words. Format each as: '"<incorrect text>" -> "<corrected text>" (<brief explanation>)'. IMPORTANT: Check genuine spelling and grammar ONLY. DO NOT flag capitalization differences, casing (e.g. lowercase skill names like python vs Python), or links/emails. Return [] if clean.
 formatting_problems:[string] Genuine ATS blockers (e.g. multi-column layout artefacts, missing contact info, missing dates, excessive length). Return [] if clean.
 skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (List verified technical keywords)
 bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points with concrete technical tools, architecture, and realistic developer metrics (e.g. database indexing, JWT auth, latency reduction, unit tests, Docker). NEVER hallucinate fake enterprise revenue or fictional business metrics.
@@ -150,9 +150,11 @@ const RULES = `Professional Evaluation & Scoring Standards:
    - Reward genuine technical depth and proof-of-work: installable packages (PyPI, NPM), published research papers, patents, live demo URLs, GitHub repositories, and concrete system architecture.
    - Fairly evaluate all engineering domains (Full-Stack, Backend, Frontend, Systems, AI/ML, Data Engineering, Embedded/IoT, CyberSec, Mobile).
 
-7. GEN-AI GRAMMAR AUDIT & LINK EXCLUSION:
-   - Identify real spelling errors, tense disagreements, and clunky phrasing.
-   - ABSOLUTE PROHIBITION: DO NOT report links, GitHub URLs (e.g. github.com/username), LinkedIn URLs (e.g. linkedin.com/in/username), portfolio domains, or emails as grammar or spelling mistakes.`;
+7. GEN-AI GRAMMAR AUDIT & STRICT EXCLUSIONS:
+   - Identify real spelling errors, typos, and genuine grammatical syntax errors.
+   - ABSOLUTE PROHIBITIONS:
+     (1) NEVER report links, GitHub URLs (e.g. github.com/username), LinkedIn URLs, portfolio domains, or emails as grammar or spelling mistakes.
+     (2) NEVER report capitalization differences, brand casing (e.g., 'python' vs 'Python', 'javascript' vs 'JavaScript', lowercase tool names, or title capitalization) as grammar or spelling errors. Check actual spelling and typos only.`;
 
 export function buildMessages(input: {
   fileName: string;
