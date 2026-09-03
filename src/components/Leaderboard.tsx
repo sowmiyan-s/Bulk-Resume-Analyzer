@@ -722,21 +722,39 @@ export function Leaderboard({
                       })()}
                     </TableCell>
                     <TableCell className="text-xs">
-                      <span
-                        className={
-                          critical > 0
-                            ? "font-semibold text-destructive"
-                            : totalIssues > 0
-                              ? "font-semibold text-amber-600 dark:text-amber-400"
-                              : "text-muted-foreground"
-                        }
-                      >
-                        {totalIssues === 0
-                          ? "0"
-                          : critical > 0
-                            ? `${totalIssues} (${critical} crit)`
-                            : `${totalIssues}`}
-                      </span>
+                      {(() => {
+                        const topIssue = a.criticalIssues?.[0]?.problem || a.ats?.blockers?.[0];
+                        const missingCount = (a.skillMatrix?.missing || []).length;
+                        return (
+                          <div className="flex flex-col gap-0.5 max-w-[14rem]" title={topIssue || `${totalIssues} issues found`}>
+                            <span
+                              className={`font-semibold ${
+                                critical > 0
+                                  ? "text-destructive"
+                                  : totalIssues > 0
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-emerald-600 dark:text-emerald-400"
+                              }`}
+                            >
+                              {totalIssues === 0
+                                ? "✔ Clean"
+                                : critical > 0
+                                  ? `${totalIssues} issues (${critical} crit)`
+                                  : `${totalIssues} issues`}
+                            </span>
+                            {topIssue && (
+                              <span className="text-[10.5px] text-muted-foreground truncate">
+                                ⚠ {topIssue}
+                              </span>
+                            )}
+                            {missingCount > 0 && (
+                              <span className="text-[10px] text-rose-500/90 truncate font-mono">
+                                ❌ {missingCount} missing skill{missingCount > 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div

@@ -167,6 +167,55 @@ export function RectifyDrawer({
     toast.success("Copied to clipboard!");
   };
 
+  const handleCopyReview = () => {
+    const lines = [
+      `==================================================`,
+      `CANDIDATE RESUME REVIEW & SCREENING FEEDBACK`,
+      `==================================================`,
+      `Candidate: ${a.candidateName}`,
+      `Target Role: ${a.role}`,
+      `Evaluation Score: ${currentScore}/100 (${a.readinessTier})`,
+      ...(typeof a.jdScore === "number" ? [`JD Match Fit: ${a.jdScore}%`] : []),
+      "",
+      `--- HR / PLACEMENT VERDICT ---`,
+      a.hrVerdict || a.recruiterFirstImpression || "Profile evaluated against target requirements.",
+      "",
+      `--- KEY STRENGTHS ---`,
+      ...(a.strengths && a.strengths.length > 0
+        ? a.strengths.map((s) => `✔ ${s}`)
+        : ["✔ Foundational technical knowledge present."]),
+      "",
+      `--- MISTAKES & CRITICAL ISSUES TO REVISE ---`,
+      ...(a.criticalIssues && a.criticalIssues.length > 0
+        ? a.criticalIssues.map((ci, i) => `${i + 1}. [${ci.area}] ${ci.problem}\n   -> ACTION FIX: ${ci.fix}`)
+        : atsData.blockers.length > 0
+          ? atsData.blockers.map((b, i) => `${i + 1}. [ATS Blocker] ${b}`)
+          : ["• No critical structural blockers detected."]),
+      "",
+      ...(a.skillMatrix?.missing && a.skillMatrix.missing.length > 0
+        ? [
+            `--- MISSING REQUIRED SKILLS ---`,
+            `The following skills required for this role were not found in your resume:`,
+            `• ${a.skillMatrix.missing.join(", ")}`,
+            "",
+          ]
+        : []),
+      ...(a.bulletRewrites && a.bulletRewrites.length > 0
+        ? [
+            `--- BULLET POINT REWRITE EXAMPLE ---`,
+            `Before: "${a.bulletRewrites[0].original}"`,
+            `After:  "${a.bulletRewrites[0].rewritten}"`,
+            `Why:    ${a.bulletRewrites[0].reason}`,
+            "",
+          ]
+        : []),
+      `==================================================`,
+    ];
+
+    void navigator.clipboard.writeText(lines.join("\n"));
+    toast.success("Full candidate feedback review copied to clipboard!");
+  };
+
   const sec = a.sectionAudits;
 
   const navItems = [
@@ -298,6 +347,15 @@ export function RectifyDrawer({
                   <RefreshCw className="size-3.5 mr-1.5" /> Re-evaluate
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs font-semibold rounded-lg border-border hover:bg-secondary text-foreground"
+                onClick={handleCopyReview}
+                title="Copy complete structured review with candidate mistakes, strengths, and fixes to clipboard"
+              >
+                <Copy className="size-3.5 mr-1.5 text-primary" /> Copy Review
+              </Button>
               <Button
                 size="sm"
                 variant="default"

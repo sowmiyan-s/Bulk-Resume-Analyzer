@@ -716,21 +716,39 @@ export function MasterTable({
                       })()}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={`text-xs font-medium ${
-                          critical > 0
-                            ? "text-destructive font-semibold"
-                            : totalIssues > 0
-                              ? "text-amber-600 dark:text-amber-400 font-semibold"
-                              : "text-muted-foreground"
-                        }`}
-                      >
-                        {totalIssues === 0
-                          ? "0 issues"
-                          : critical > 0
-                            ? `${totalIssues} ${totalIssues === 1 ? "issue" : "issues"} (${critical} crit)`
-                            : `${totalIssues} ${totalIssues === 1 ? "issue" : "issues"}`}
-                      </span>
+                      {(() => {
+                        const topIssue = a.criticalIssues?.[0]?.problem || a.ats?.blockers?.[0];
+                        const missingCount = (a.skillMatrix?.missing || []).length;
+                        return (
+                          <div className="flex flex-col gap-0.5 max-w-[15rem]" title={topIssue || `${totalIssues} issues found`}>
+                            <span
+                              className={`text-xs font-semibold ${
+                                critical > 0
+                                  ? "text-destructive"
+                                  : totalIssues > 0
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-emerald-600 dark:text-emerald-400"
+                              }`}
+                            >
+                              {totalIssues === 0
+                                ? "✔ Clean profile"
+                                : critical > 0
+                                  ? `${totalIssues} issues (${critical} critical)`
+                                  : `${totalIssues} minor issues`}
+                            </span>
+                            {topIssue && (
+                              <span className="text-[10.5px] text-muted-foreground truncate">
+                                ⚠ {topIssue}
+                              </span>
+                            )}
+                            {missingCount > 0 && (
+                              <span className="text-[10px] text-rose-500/90 truncate font-mono">
+                                ❌ {missingCount} missing JD skill{missingCount > 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div
