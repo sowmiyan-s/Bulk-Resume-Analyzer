@@ -379,22 +379,29 @@ function Index() {
 
       // 1. If not yet pre-extracted in the background, extract now:
       if (!clean) {
-        if (!item.file.bytes || item.file.bytes.length === 0) {
+        if (raw && raw.trim().length > 50) {
+          const result = sanitizeResumeText(raw);
+          clean = result.clean;
+          fixes = result.fixes;
+          warnings = result.warnings;
+          patch(item.id, { cleanText: clean, fixes, warnings });
+        } else if (!item.file.bytes || item.file.bytes.length === 0) {
           if (item.analysis) {
             const a = item.analysis;
             clean = [
-              `Candidate Name: ${a.candidateName}`,
-              `Target Role: ${a.role}`,
-              `Assumed Role: ${a.assumedRole}`,
-              `HR Verdict: ${a.hrVerdict}`,
-              `Recruiter Impression: ${a.recruiterFirstImpression}`,
-              `Matched Skills: ${(a.skillMatrix?.matched || []).join(", ")}`,
-              `Missing Skills: ${(a.skillMatrix?.missing || []).join(", ")}`,
-              `Recommended Skills: ${(a.skillMatrix?.recommended || []).join(", ")}`,
-              `Strengths: ${(a.strengths || []).join("; ")}`,
-              `Critical Issues: ${(a.criticalIssues || []).map((ci) => `${ci.area} (${ci.severity}): ${ci.problem} - Fix: ${ci.fix}`).join("; ")}`,
-              `Improvement Suggestions: ${(a.techImprovementIdeas || []).join("; ")}`,
-            ].join("\n\n");
+              `# ${a.candidateName || "Candidate"}`,
+              `**Target Role:** ${a.role || a.assumedRole || "Software Engineer"}`,
+              `\n## Professional Summary`,
+              `${a.hrVerdict || a.recruiterFirstImpression || "Experienced engineering profile."}`,
+              `\n## Core Technical Skills`,
+              `Skills: ${(a.skillMatrix?.matched || []).concat(a.skillMatrix?.recommended || []).join(", ") || "TypeScript, React, Node.js, Python, SQL, Git"}`,
+              `\n## Key Experience & Projects`,
+              ...(a.bulletRewrites && a.bulletRewrites.length > 0
+                ? a.bulletRewrites.map((br) => `• ${br.rewritten || br.original}`)
+                : (a.strengths || []).map((s) => `• ${s}`)),
+              `\n## Technical Improvements & Action Items`,
+              ...(a.techImprovementIdeas || []).map((idea) => `• ${idea}`),
+            ].join("\n");
             patch(item.id, { cleanText: clean });
           } else {
             throw new LlmError("No resume text or binary available for analysis.", null, false);
@@ -770,6 +777,8 @@ function Index() {
               id,
               fileName: i.file.name,
               analysis: updatedAnalysis,
+              cleanText: p.cleanText,
+              rawText: i.rawText,
             }).catch(() => {});
             return {
               ...i,
@@ -801,11 +810,12 @@ function Index() {
         { concurrency: 1, cooldownSec: 0, maxRetries, retryBackoffSec: 3 },
         {
           onSuccess: (rid, analysis) => {
-            // Preserve officer overrides across a re-analysis.
+            // Fresh score calculated: reset manual override while preserving officer notes.
             const prevAnalysis = itemsRef.current.find((i) => i.id === rid)?.analysis;
+            const item = itemsRef.current.find((i) => i.id === rid);
             const merged: Analysis = {
               ...analysis,
-              manualScore: prevAnalysis?.manualScore ?? null,
+              manualScore: null,
               officerNotes: prevAnalysis?.officerNotes ?? "",
             };
             patch(rid, {
@@ -814,7 +824,6 @@ function Index() {
               message: "",
               analysis: merged,
             });
-            const item = itemsRef.current.find((i) => i.id === rid);
             void saveAnalysis({
               id: rid,
               fileName: item?.file.name ?? rid,
@@ -822,7 +831,7 @@ function Index() {
               cleanText: item?.cleanText,
               rawText: item?.rawText,
             }).catch(() => {});
-            toast.success("Re-analyzed with your corrected text.");
+            toast.success("Re-analyzed successfully with updated evaluation score.");
           },
           onError: (rid, message, willRetry) => {
             if (!willRetry) {
@@ -942,9 +951,10 @@ function Index() {
           },
           onSuccess: (id, analysis) => {
             const prevAnalysis = itemsRef.current.find((i) => i.id === id)?.analysis;
+            const item = itemsRef.current.find((i) => i.id === id);
             const merged: Analysis = {
               ...analysis,
-              manualScore: prevAnalysis?.manualScore ?? null,
+              manualScore: null,
               officerNotes: prevAnalysis?.officerNotes ?? "",
             };
             patch(id, {
@@ -954,7 +964,6 @@ function Index() {
               analysis: merged,
               durationMs: Date.now() - (started.get(id) ?? Date.now()),
             });
-            const item = itemsRef.current.find((i) => i.id === id);
             void saveAnalysis({
               id,
               fileName: item?.file.name ?? id,

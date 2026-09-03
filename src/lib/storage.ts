@@ -65,18 +65,29 @@ function writeLocal(rows: StoredAnalysis[]) {
   memoryCache = rows;
   if (typeof window === "undefined") return;
   try {
-    const trimmed = rows.slice(-100).map((r) => ({
-      ...r,
-      raw_text: r.raw_text ? r.raw_text.slice(0, 1000) : "",
-      clean_text: r.clean_text ? r.clean_text.slice(0, 1000) : "",
-    }));
-    window.localStorage.setItem(LS_KEY, JSON.stringify(trimmed));
+    // 1. First attempt: persist full records with complete text (modern browser quota is 5-10MB)
+    window.localStorage.setItem(LS_KEY, JSON.stringify(rows.slice(-100)));
   } catch {
     try {
-      const compact = rows.slice(-30).map((r) => ({ ...r, raw_text: "", clean_text: "" }));
-      window.localStorage.setItem(LS_KEY, JSON.stringify(compact));
+      // 2. Fallback on quota limit: keep full clean_text for last 50, compact older raw_text
+      const semiCompact = rows.slice(-60).map((r, idx) => ({
+        ...r,
+        raw_text: idx >= 30 ? (r.raw_text ? r.raw_text.slice(0, 2000) : "") : "",
+        clean_text: r.clean_text || "",
+      }));
+      window.localStorage.setItem(LS_KEY, JSON.stringify(semiCompact));
     } catch {
-      /* quota fallback */
+      try {
+        // 3. High-density fallback: keep clean_text only
+        const compact = rows.slice(-40).map((r) => ({
+          ...r,
+          raw_text: "",
+          clean_text: r.clean_text || "",
+        }));
+        window.localStorage.setItem(LS_KEY, JSON.stringify(compact));
+      } catch {
+        /* final quota fallback */
+      }
     }
   }
 }
