@@ -977,14 +977,10 @@ export function createRuleBasedAnalysis(
   const role = activeJd ? "Target JD Role" : defaultRole || "Software Engineer (Entry Level)";
   const basis: "role-fit" | "jd-fit" = activeJd ? "jd-fit" : "role-fit";
   const hasHardBlockers = atsReport.blockers.length > 0;
-  // Calibrate rule-based ATS format score: format-only checks without verified AI project architecture reasoning
-  // are scaled appropriately so superficial formatting doesn't outscore verified technical candidates.
-  const rawRuleScore = atsReport.score;
-  const calibratedScore = Math.min(
-    74,
-    Math.round(rawRuleScore * 0.72 + (atsReport.metrics.skillsFound.length >= 8 ? 8 : 4)),
-  );
-  const overallScore = hasHardBlockers ? Math.min(58, calibratedScore) : calibratedScore;
+  // The deterministic score is the report's single source of truth. Do not
+  // apply another opaque multiplier here: it makes category evidence disagree
+  // with the score used for ranking.
+  const overallScore = atsReport.score;
   const readinessTier = toTier(undefined, overallScore, hasHardBlockers);
 
   const finalBreakdown: ScoreRow[] = atsReport.categories.map((c) => ({

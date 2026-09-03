@@ -571,6 +571,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   }
 
   const skillsFound = containsAny(text, SKILL_TAXONOMY);
+  const provenSkillCount = parsed.provenSkills.length;
   const blockers: string[] = [];
 
   /* --- 1. Parseability & contact (20) --- */
@@ -805,7 +806,8 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "jd-skills",
           "Target JD required skills & keywords match",
-          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)),
+          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)) &&
+            (bulletMatchedCount >= 1 || matched.length < 3),
           Math.min(
             10,
             kws.length
@@ -819,8 +821,8 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "skill-count",
           "Technical skills applied in project context",
-          provenSkills.length >= 2 || skillsFound.length >= 4,
-           Math.min(5, provenSkills.length * 1.5 + Math.min(2, skillsFound.length * 0.25)),
+          provenSkills.length >= 2,
+          Math.min(5, provenSkills.length * 1.5 + Math.min(2, skillsFound.length * 0.25)),
           5,
           provenSkills.length > 0
             ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 5).join(", ")}).`
@@ -861,7 +863,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "tooling",
           "Cloud / DevOps / testing tooling present",
-          containsAny(text, [
+          containsAny(evidenceText, [
             "aws",
             "azure",
             "gcp",
@@ -878,7 +880,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
           ]).length > 0,
           Math.min(
             6,
-            containsAny(text, [
+            containsAny(evidenceText, [
               "aws",
               "azure",
               "gcp",
@@ -895,7 +897,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
             ]).length * 1.5,
           ),
           6,
-          "Modern engineering tooling signals reliability to screeners.",
+          `${containsAny(evidenceText, ["aws", "azure", "gcp", "docker", "kubernetes", "ci/cd", "jenkins", "github actions", "pytest", "jest", "junit", "terraform", "git"]).length} delivery/testing tools demonstrated in experience or projects.`,
         ),
       ];
 
