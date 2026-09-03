@@ -240,14 +240,21 @@ export function capForPrompt(text: string, maxChars = 9000): string {
   return `${text.slice(0, head)}\n\n[...trimmed for length...]\n\n${text.slice(-tail)}`;
 }
 
-/** Converts "ALL CAPS" or "snake_case" or "camelCase" strings to Title Case */
+/** Converts "ALL CAPS" or "snake_case" or "camelCase" strings to Title Case, stripping honorifics */
 function toTitleCase(str: string): string {
-  return str
+  let s = str
+    .replace(/\b(mr|mrs|ms|dr|er|prof|shri|smt)\.?\b/gi, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_\-.]+/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
+    .trim();
+
+  s = s.replace(/^(mr|mrs|ms|dr|er|prof|shri|smt)\.?\s+/i, "").trim();
+
+  return s
     .split(" ")
+    .filter(Boolean)
+    .filter((w) => !/^(mr|mrs|ms|dr|er|prof|shri|smt)\.?$/i.test(w))
     .map((word) => {
       // Keep single initial uppercase: "R.", "M"
       if (word.length <= 2) return word.toUpperCase();
@@ -258,87 +265,156 @@ function toTitleCase(str: string): string {
 
 /**
  * Intelligently extracts and normalizes the candidate's real name.
- * Uses both resume text headers and file name patterns, reliably stripping
- * college roll/register numbers, file suffixes, and formatting anomalies.
+ * Uses a multi-pass architecture:
+ * 1. Explicit labeled fields ("Name: John Doe", "Full Name: Jane Smith")
+ * 2. Top-of-resume text extraction with honorific/title/institution stripping
+ * 3. Email address username extraction (e.g. "sowmiyan.s@gmail.com" -> "Sowmiyan S")
+ * 4. File name extraction with roll number, date, and descriptor stripping
  */
 export function extractCandidateName(text?: string, fileName?: string): string {
   const cleanRaw = (text || "").trim();
 
-  // 1. Try extracting from the top lines of resume text
+  // Helper: check if a candidate name candidate string is valid
+  const isValidName = (str: string): boolean => {
+    const s = str.trim();
+    if (s.length < 2 || s.length > 50) return false;
+    // Disallow numbers, emails, URLs, dates
+    if (/@|https?:|\.com|\.in|\.org|\.edu|\.net|\d{3,}/i.test(s)) return false;
+    // Disallow section headers and common non-name phrases
+    if (
+      /^(curriculum\s+vitae|resume|cv|biodata|bio\s*data|profile|summary|contact|objective|career\s+objective|professional\s+summary|education|skills|technical\s+skills|projects|experience|work\s+experience|achievements|certifications|declaration|personal\s+details|personal\s+profile|academic\s+profile|student|engineer|developer|fresher|candidate|details|address|phone|email)$/i.test(
+        s,
+      )
+    ) {
+      return false;
+    }
+    // Disallow common colleges / universities / company names
+    if (
+      /\b(college|university|institute|school|polytechnic|technologies|solutions|services|ltd|pvt|inc|corp|engineering|department|campus|foundation)\b/i.test(
+        s,
+      )
+    ) {
+      return false;
+    }
+    // Must contain letters and valid name characters (spaces, dots, hyphens, apostrophes)
+    if (!/^[A-Za-z\s.'’\-]+$/.test(s)) return false;
+    const words = s.split(/\s+/).filter(Boolean);
+    return words.length >= 1 && words.length <= 5;
+  };
+
+  // Helper: clean a raw line into a potential name
+  const cleanNameCandidate = (raw: string): string => {
+    let s = raw
+      // Strip markdown and decorative bullets/icons
+      .replace(/^[#*•▪◦‣·–—>|\s~_👤\(\)\[\]]+/u, "")
+      .replace(/[*•▪◦‣·–—>|\s~_👤\(\)\[\]]+$/u, "")
+      // Strip roll / register / student IDs at start (e.g. "723723243097 - Sathwik Narayanan")
+      .replace(/^\d{4,}[\s\-_:.]*/, "")
+      // Strip label prefixes like "Name:", "Candidate Name:", "Full Name:"
+      .replace(/^(candidate\s+name|full\s+name|name)\s*[:\-]\s*/i, "")
+      // Strip honorifics / titles
+      .replace(/^(mr\.|mrs\.|ms\.|dr\.|er\.|prof\.)\s+/i, "")
+      .trim();
+
+    // Strip trailing job titles / degrees on the same line (e.g. "Sowmiyan S | Full Stack Developer", "Alex Smith - B.Tech CSE")
+    s = s.replace(/[\s|–—\-,]+(b\.?e\.?|b\.?tech\.?|m\.?tech\.?|m\.?c\.?a\.?|b\.?sc\.?|bca|msc|software\s+engineer|full\s*stack|developer|frontend|backend|data\s+scientist|ai\s+engineer|web\s+developer|fresher|sde).*$/i, "");
+
+    return s.trim();
+  };
+
+  // --- PASS 1: Explicit "Name: ..." or "Candidate: ..." pattern in top 25 lines ---
   if (cleanRaw.length > 0) {
-    const rawLines = cleanRaw
+    const lines = cleanRaw
       .replace(/\[DOCUMENT METRICS:[^\]]*\]/gi, "")
       .replace(/--- Page \d+ ---/gi, "")
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
 
-    for (let i = 0; i < Math.min(5, rawLines.length); i++) {
-      let line = rawLines[i]!;
+    for (let i = 0; i < Math.min(25, lines.length); i++) {
+      const match = lines[i]!.match(/^(?:candidate\s+name|full\s+name|name)\s*[:\-]\s*([A-Za-z\s.'\-]+)/i);
+      if (match && match[1]) {
+        const cleaned = cleanNameCandidate(match[1]);
+        if (isValidName(cleaned)) {
+          return toTitleCase(cleaned);
+        }
+      }
+    }
 
-      // Strip roll/registration numbers at line start: e.g. "723723243097 - Sathwik Narayanan"
-      line = line.replace(/^\d{6,}[\s\-_:.]*/, "").trim();
+    // --- PASS 2: Top header lines of resume ---
+    for (let i = 0; i < Math.min(10, lines.length); i++) {
+      const line = lines[i]!;
 
-      // Check if line looks like a person's name
-      const isHeaderOrSection =
-        /^(career\s+objective|professional\s+summary|curriculum\s+vitae|resume|cv|biodata|profile|contact|summary|objective|education|skills|technical\s+skills|experience|work\s+experience|projects|academic\s+projects|personal\s+details|declaration|achievements|certifications|name\s*[:\-])/i.test(
-          line,
-        );
-      const isContactLine =
-        /@|https?:|\.com|\.in|\.org|\+?\d{8,}|\b(phone|mobile|email|linkedin|github)\b/i.test(
-          line,
-        );
+      // Skip lines that are obviously contact info, URLs, or full sentences
+      if (/@|https?:|\.com|\.in|\.org|\+?\d{8,}|\b(phone|mobile|email|linkedin|github)\b/i.test(line)) {
+        continue;
+      }
+      if (line.length > 60 || /[.,;!?]$/.test(line.trim())) {
+        continue;
+      }
 
-      if (!isHeaderOrSection && !isContactLine) {
-        // Strip label "Name:" if present
-        line = line.replace(/^name\s*[:\-]\s*/i, "").trim();
+      const cleaned = cleanNameCandidate(line);
+      if (isValidName(cleaned)) {
+        return toTitleCase(cleaned);
+      }
+    }
 
-        // Valid name pattern: 2 to 45 chars, mostly letters and spaces, max 5 words
-        if (
-          line.length >= 2 &&
-          line.length <= 45 &&
-          /^[A-Za-z\s.'-]+$/.test(line) &&
-          line.split(/\s+/).length <= 5
-        ) {
-          return toTitleCase(line);
+    // --- PASS 3: Extract name from email username (e.g. "sowmiyan.s@gmail.com" -> "Sowmiyan S") ---
+    const emailMatch = cleanRaw.match(/([\w.+-]+)@[\w-]+\.[\w.]+/);
+    if (emailMatch && emailMatch[1]) {
+      let user = emailMatch[1]
+        .replace(/\d+/g, "") // strip trailing digits
+        .replace(/[_\-.]+/g, " ")
+        .trim();
+      if (user.length >= 3 && /^[A-Za-z\s]+$/.test(user)) {
+        const words = user.split(/\s+/).filter(Boolean);
+        if (words.length >= 1 && words.length <= 4) {
+          const emailName = toTitleCase(user);
+          // If we haven't found a text header name yet, keep emailName as a strong candidate
+          if (isValidName(emailName)) {
+            // If fileName exists and has meaningful words, check fileName first; otherwise return emailName
+            if (!fileName || fileName.toLowerCase().includes("resume") || fileName.toLowerCase().includes("cv")) {
+              return emailName;
+            }
+          }
         }
       }
     }
   }
 
-  // 2. Try extracting from file name
+  // --- PASS 4: Extract and clean from file name ---
   if (fileName && fileName.trim().length > 0) {
     let name = fileName.trim();
 
-    // Strip extension
+    // Strip file extension
     name = name.replace(/\.[^/.]+$/, "");
 
-    // Strip counters like " (1)", " (2)"
+    // Strip duplicate counters like " (1)", " (2)"
     name = name.replace(/\s*\(\d+\)$/gi, "");
 
-    // Replace delimiters with spaces first so word boundaries work reliably
-    name = name.replace(/[_\-.]+/g, " ");
+    // Strip leading dates or timestamps (e.g. "2024_03_12_John_Doe")
+    name = name.replace(/^\d{4}[-_.]\d{2}[-_.]\d{2}[-_.]*/, "");
+
+    // Strip college roll / register numbers at start: e.g. "723723243097_Sowmiyan_S"
+    name = name.replace(/^\s*\d{6,}[\s\-_.]*/, "");
 
     // Split camelCase words (e.g. "ShyamPrasathS" -> "Shyam Prasath S")
     name = name.replace(/([a-z])([A-Z])/g, "$1 $2");
 
-    // Strip college roll / register numbers at start: e.g. "723723243097", "723723243116"
-    name = name.replace(/^\s*\d{6,}\s*/, "");
+    // Replace delimiters with spaces
+    name = name.replace(/[_\-.]+/g, " ");
 
-    // Strip descriptor and resume keywords
+    // Strip descriptor keywords
     name = name.replace(
-      /\b(ats|fr[ei]{2}ndly|single\s*column|resume|cv|biodata|profile|copy|v\d+|compressed|new|final|latest|updated)\b/gi,
+      /\b(ats|fr[ei]{2}ndly|single\s*column|resume|cv|biodata|bio\s*data|profile|copy|v\d+|compressed|new|final|latest|updated|developer|engineer|software|full\s*stack|frontend|backend|intern|internship|fresher|sde|tech|draft|document|doc)\b/gi,
       " ",
     );
 
     // Clean extra spaces
     name = name.replace(/\s+/g, " ").trim();
 
-    if (name.length >= 2 && /^[A-Za-z0-9\s.'-]+$/.test(name)) {
-      const cleanName = toTitleCase(name);
-      if (cleanName.length >= 2 && !/^(resume|cv|document|candidate)$/i.test(cleanName)) {
-        return cleanName;
-      }
+    if (isValidName(name)) {
+      return toTitleCase(name);
     }
   }
 

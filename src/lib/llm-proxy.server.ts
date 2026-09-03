@@ -19,6 +19,7 @@ export interface ProxyLlmPayload {
 
 interface ProviderVaultKeys {
   lovable?: string | undefined;
+  openai?: string | undefined;
   qwen?: string | undefined;
   groq?: string | undefined;
   cerebras?: string | undefined;
@@ -39,6 +40,9 @@ async function loadVaultKeys(): Promise<ProviderVaultKeys> {
     const config = await db.collection("system_settings").findOne({ key: "global_config" });
     if (config) {
       const { decryptSecret } = await import("./database.server");
+      if (typeof config["openaiApiKey"] === "string" && config["openaiApiKey"].trim()) {
+        keys.openai = decryptSecret(config["openaiApiKey"].trim());
+      }
       if (typeof config["qwenApiKey"] === "string" && config["qwenApiKey"].trim()) {
         keys.qwen = decryptSecret(config["qwenApiKey"].trim());
       }
@@ -62,32 +66,67 @@ async function loadVaultKeys(): Promise<ProviderVaultKeys> {
     console.warn("[llm-proxy] Could not query MongoDB system_settings:", e);
   }
 
-  // 2. Fallback to process.env if available
-  if (typeof process !== "undefined" && process.env) {
-    const lovable = process.env["LOVABLE_API_KEY"]?.trim();
-    if (!keys.lovable && lovable) keys.lovable = lovable;
-
-    const qwen = (process.env["QWEN_API_KEY"] || process.env["DASHSCOPE_API_KEY"] || process.env["VITE_QWEN_API_KEY"])?.trim();
-    if (!keys.qwen && qwen) keys.qwen = qwen;
-
-    const groq = (process.env["GROQ_API_KEY"] || process.env["VITE_GROQ_API_KEY"])?.trim();
-    if (!keys.groq && groq) keys.groq = groq;
-
-    const cerebras = (process.env["CEREBRAS_API_KEY"] || process.env["VITE_CEREBRAS_API_KEY"])?.trim();
-    if (!keys.cerebras && cerebras) keys.cerebras = cerebras;
-
-    const openrouter = (process.env["OPENROUTER_API_KEY"] || process.env["VITE_OPENROUTER_API_KEY"])?.trim();
-    if (!keys.openrouter && openrouter) keys.openrouter = openrouter;
-
-    const gemini = (process.env["GEMINI_API_KEY"] || process.env["VITE_GEMINI_API_KEY"])?.trim();
-    if (!keys.gemini && gemini) keys.gemini = gemini;
-
-    const nvidia = (process.env["NVIDIA_API_KEY"] || process.env["VITE_NVIDIA_API_KEY"])?.trim();
-    if (!keys.nvidia && nvidia) keys.nvidia = nvidia;
-
-    const litellm = (process.env["LITELLM_API_KEY"] || "sk-litellm")?.trim();
-    if (!keys.litellm && litellm) keys.litellm = litellm;
+  // 2. Fallback to process.env and .env file directly
+  let fileEnv: Record<string, string> = {};
+  try {
+    if (typeof window === "undefined" && typeof process !== "undefined" && process.cwd) {
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx > 0) {
+            const k = trimmed.slice(0, eqIdx).trim();
+            const v = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+            fileEnv[k] = v;
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore fallback */
   }
+
+  const getVal = (names: string[]): string | undefined => {
+    for (const name of names) {
+      const envVal = typeof process !== "undefined" && process.env ? process.env[name]?.trim() : undefined;
+      if (envVal) return envVal;
+      const fileVal = fileEnv[name]?.trim();
+      if (fileVal) return fileVal;
+    }
+    return undefined;
+  };
+
+  const lovable = getVal(["LOVABLE_API_KEY"]);
+  if (!keys.lovable && lovable) keys.lovable = lovable;
+
+  const openai = getVal(["OPENAI_API_KEY", "VITE_OPENAI_API_KEY"]);
+  if (!keys.openai && openai) keys.openai = openai;
+
+  const qwen = getVal(["QWEN_API_KEY", "DASHSCOPE_API_KEY", "VITE_QWEN_API_KEY"]);
+  if (!keys.qwen && qwen) keys.qwen = qwen;
+
+  const groq = getVal(["GROQ_API_KEY", "VITE_GROQ_API_KEY"]);
+  if (!keys.groq && groq) keys.groq = groq;
+
+  const cerebras = getVal(["CEREBRAS_API_KEY", "VITE_CEREBRAS_API_KEY"]);
+  if (!keys.cerebras && cerebras) keys.cerebras = cerebras;
+
+  const openrouter = getVal(["OPENROUTER_API_KEY", "VITE_OPENROUTER_API_KEY"]);
+  if (!keys.openrouter && openrouter) keys.openrouter = openrouter;
+
+  const gemini = getVal(["GEMINI_API_KEY", "VITE_GEMINI_API_KEY"]);
+  if (!keys.gemini && gemini) keys.gemini = gemini;
+
+  const nvidia = getVal(["NVIDIA_API_KEY", "VITE_NVIDIA_API_KEY"]);
+  if (!keys.nvidia && nvidia) keys.nvidia = nvidia;
+
+  const litellm = getVal(["LITELLM_API_KEY"]) || "sk-litellm";
+  if (!keys.litellm && litellm) keys.litellm = litellm;
 
   return keys;
 }
@@ -209,6 +248,8 @@ async function invokeChatCompletions(
         fallbackEndpoint =
           "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions";
       }
+    } else if (provider === "openai") {
+      endpoint = "https://api.openai.com/v1/chat/completions";
     } else if (provider === "groq") {
       endpoint = "https://api.groq.com/openai/v1/chat/completions";
     } else if (provider === "cerebras") {
@@ -320,6 +361,50 @@ async function invokeChatCompletions(
   throw new Error(`${provider.toUpperCase()} API error (${res.status}): ${parsedErr}`);
 }
 
+const PROVIDER_MODEL_CASCADES: Record<string, string[]> = {
+  openai: [
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-3.5-turbo",
+  ],
+  groq: [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+  ],
+  cerebras: [
+    "llama3.3-70b",
+    "llama3.1-8b",
+  ],
+  qwen: [
+    "qwen-plus",
+    "qwen-turbo",
+    "qwen-max",
+  ],
+  gemini: [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+  ],
+  openrouter: [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "deepseek/deepseek-chat",
+    "deepseek/deepseek-r1:free",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemini-2.0-flash-exp:free",
+  ],
+  nvidia: [
+    "meta/llama-3.3-70b-instruct",
+    "meta/llama-3.1-8b-instruct",
+    "mistralai/mistral-large-2-instruct",
+  ],
+};
+
 export const executeLlmProxy = createServerFn({ method: "POST" })
   .validator((data: ProxyLlmPayload) => {
     // Input sanitation and guardrails
@@ -355,37 +440,53 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
     if (provider === "ollama") primaryKey = "ollama-local";
     if (provider === "litellm" && !primaryKey) primaryKey = "sk-litellm";
 
-    // 2. Try primary model first
-    const attemptedProviders: string[] = [];
+    const attemptedModels: string[] = [];
     let lastError: unknown = null;
 
+    // Helper: try invoking a model for a specific provider
+    const tryModel = async (
+      prov: import("./models").ProviderId,
+      mId: string,
+      key: string,
+    ): Promise<ProxyLlmResponse> => {
+      attemptedModels.push(`${prov} (${mId})`);
+      if (prov === "gemini") {
+        return await invokeGemini(mId, key, messages, temperature, maxTokens);
+      }
+      return await invokeChatCompletions(
+        prov,
+        mId,
+        key,
+        targetUrl,
+        customBaseUrl,
+        messages,
+        temperature,
+        maxTokens,
+        supportsJsonMode,
+      );
+    };
+
+    // 2. Try primary model and its sibling models within the primary provider
     if (primaryKey || provider === "openai-compatible") {
-      attemptedProviders.push(`${provider} (${modelId})`);
-      try {
-        if (provider === "gemini") {
-          return await invokeGemini(modelId, primaryKey ?? "", messages, temperature, maxTokens);
+      const primaryCandidateModels = [
+        modelId,
+        ...(PROVIDER_MODEL_CASCADES[provider] || []).filter((m) => m !== modelId),
+      ];
+
+      for (const candidateModel of primaryCandidateModels) {
+        try {
+          return await tryModel(provider as import("./models").ProviderId, candidateModel, primaryKey ?? "");
+        } catch (err: unknown) {
+          lastError = err;
+          console.warn(
+            `[llm-proxy] Model '${candidateModel}' on '${provider}' hit error/rate-limit. Trying next sibling model or provider...`,
+          );
         }
-        return await invokeChatCompletions(
-          provider,
-          modelId,
-          primaryKey ?? "",
-          targetUrl,
-          customBaseUrl,
-          messages,
-          temperature,
-          maxTokens,
-          supportsJsonMode,
-        );
-      } catch (err: unknown) {
-        lastError = err;
-        console.warn(
-          `[llm-proxy] Primary provider '${provider}' hit an error (${err instanceof Error ? err.message : String(err)}). Cascading to available vault providers...`,
-        );
       }
     }
 
-    // 3. Multi-Provider Fallback Cascade
-    // If the primary provider hit a rate limit or had no key, cascade through all other configured providers
+    // 3. Multi-Provider & Sibling Model Fallback Cascade
+    // Cascade through all other configured providers in the vault
     const fallbackProviders = FALLBACK_PROVIDER_ORDER.filter(
       (p) =>
         p !== provider &&
@@ -399,48 +500,30 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
       const fbKey = vaultKeys[fbProvider as keyof ProviderVaultKeys]?.trim();
       if (!fbKey) continue;
 
-      const fbModelOption = getDefaultModelForProvider(fbProvider);
-      attemptedProviders.push(`${fbProvider} (${fbModelOption.id})`);
-      console.info(
-        `[llm-proxy] 🔄 Auto-fallback active: Routing request to '${fbProvider}' (${fbModelOption.id})...`,
-      );
+      const fallbackModelList = PROVIDER_MODEL_CASCADES[fbProvider] || [
+        getDefaultModelForProvider(fbProvider as import("./models").ProviderId).id,
+      ];
 
-      try {
-        if (fbProvider === "gemini") {
-          const res = await invokeGemini(
-            fbModelOption.id,
-            fbKey,
-            messages,
-            temperature,
-            maxTokens,
-          );
-          console.info(`[llm-proxy] ✅ Fallback to Gemini (${fbModelOption.id}) succeeded!`);
+      for (const fbModel of fallbackModelList) {
+        console.info(
+          `[llm-proxy] 🔄 Auto-fallback active: Routing request to '${fbProvider}' (${fbModel})...`,
+        );
+
+        try {
+          const res = await tryModel(fbProvider as import("./models").ProviderId, fbModel, fbKey);
+          console.info(`[llm-proxy] ✅ Fallback to ${fbProvider} (${fbModel}) succeeded!`);
           return res;
+        } catch (fbErr: unknown) {
+          lastError = fbErr;
+          console.warn(
+            `[llm-proxy] Fallback model '${fbModel}' on '${fbProvider}' failed or rate-limited. Cascading...`,
+          );
+          await sleep(350);
         }
-
-        const res = await invokeChatCompletions(
-          fbProvider,
-          fbModelOption.id,
-          fbKey,
-          undefined,
-          undefined,
-          messages,
-          temperature,
-          maxTokens,
-          fbModelOption.supportsJsonMode,
-        );
-        console.info(`[llm-proxy] ✅ Fallback to ${fbProvider} (${fbModelOption.id}) succeeded!`);
-        return res;
-      } catch (fbErr: unknown) {
-        lastError = fbErr;
-        console.warn(
-          `[llm-proxy] Fallback provider '${fbProvider}' also rate-limited: ${fbErr instanceof Error ? fbErr.message : String(fbErr)}`,
-        );
-        await sleep(500);
       }
     }
 
-    // If all providers failed or no keys were found
+    // If all providers and sibling models failed or no keys were configured
     if (!primaryKey && fallbackProviders.length === 0) {
       throw new Error(
         `No API key configured in MongoDB for '${provider}' or any fallback providers. Please log in to the Admin Panel (/admin) to configure your free API keys.`,
@@ -449,6 +532,6 @@ export const executeLlmProxy = createServerFn({ method: "POST" })
 
     const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
     throw new Error(
-      `All configured AI providers exhausted or rate-limited (Tried: ${attemptedProviders.join(", ")}). Error: ${lastMsg}`,
+      `All configured AI providers exhausted or rate-limited (Tried: ${attemptedModels.join(", ")}). Error: ${lastMsg}`,
     );
   });

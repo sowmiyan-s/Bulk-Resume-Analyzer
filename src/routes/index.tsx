@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
@@ -29,6 +31,10 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { MasterTable, type MasterRow } from "@/components/MasterTable";
 import { RectifyDrawer, type RectifyTarget } from "@/components/RectifyDrawer";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { CandidateComparator, type CandidateCompareItem } from "@/components/CandidateComparator";
+import { EmailDraftModal } from "@/components/EmailDraftModal";
+import { BatchAnalytics } from "@/components/BatchAnalytics";
+import { JD_PRESETS } from "@/lib/jd-presets";
 import {
   effectiveScore,
   normalizeAnalysis,
@@ -90,13 +96,14 @@ type QueueItem = {
 };
 
 export type SystemInfo = {
-  hasServerQwenKey?: boolean;
+  hasServerNvidiaKey?: boolean;
   hasServerGroqKey?: boolean;
+  hasServerQwenKey?: boolean;
   hasServerCerebrasKey?: boolean;
   hasServerOpenRouterKey?: boolean;
-  hasServerNvidiaKey: boolean;
-  hasServerGeminiKey: boolean;
+  hasServerGeminiKey?: boolean;
   defaultRole: string;
+  defaultJd?: string;
   companyName: string;
   defaultModelId?: string;
   databaseConnected?: boolean;
@@ -111,12 +118,14 @@ function Index() {
     hasServerNvidiaKey: false,
     hasServerGeminiKey: false,
     defaultRole: "Software Engineer (Entry Level)",
+    defaultJd: "",
     companyName: "the hiring company",
     defaultModelId: "",
     databaseConnected: true,
   });
   const [items, setItems] = useState<QueueItem[]>([]);
   const [tab, setTab] = useState<"analyze" | "leaderboard">("analyze");
+  const [roleTitle, setRoleTitle] = useState("");
   const [jd, setJd] = useState("");
   const [useJd, setUseJd] = useState(false);
   const [ruleBasedOnly, setRuleBasedOnly] = useState(false);
@@ -128,7 +137,21 @@ function Index() {
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [drawerId, setDrawerId] = useState<string | null>(null);
+  const [compareCandidates, setCompareCandidates] = useState<CandidateCompareItem[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [emailTarget, setEmailTarget] = useState<Analysis | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
   const queueRef = useRef<RateLimitedQueue<Analysis> | null>(null);
+
+  const handleCompare = useCallback((rows: Array<{ id: string; fileName: string; analysis: Analysis }>) => {
+    setCompareCandidates(rows.map((r) => ({ id: r.id, fileName: r.fileName, analysis: r.analysis })));
+    setCompareOpen(true);
+  }, []);
+
+  const handleDraftEmail = useCallback((row: { analysis: Analysis }) => {
+    setEmailTarget(row.analysis);
+    setEmailOpen(true);
+  }, []);
 
   const refreshSystemInfo = useCallback(async () => {
     try {
@@ -449,6 +472,12 @@ function Index() {
         });
       }, 2500);
 
+      const effectiveRole =
+        roleTitle.trim() ||
+        settings.defaultRole ||
+        systemInfo.defaultRole ||
+        "Software Engineer (Entry Level)";
+
       const activeJd =
         overrideJd !== undefined
           ? typeof overrideJd === "string" && overrideJd.trim()
@@ -456,7 +485,9 @@ function Index() {
             : undefined
           : useJd && jd.trim()
             ? jd.trim()
-            : undefined;
+            : systemInfo.defaultJd && systemInfo.defaultJd.trim()
+              ? systemInfo.defaultJd.trim()
+              : undefined;
 
       // Run deterministic rule-based ATS engine
       const atsReport = runAtsEngine(clean, activeJd);
@@ -467,7 +498,7 @@ function Index() {
           item.file.name,
           clean,
           activeJd,
-          settings.defaultRole,
+          effectiveRole,
         );
       }
 
@@ -496,7 +527,7 @@ function Index() {
             {
               fileName: item.file.name,
               resumeText: clean,
-              defaultRole: settings.defaultRole,
+              defaultRole: effectiveRole,
               companyName: settings.companyName,
               atsFacts,
               ...(activeJd ? { jobDescription: activeJd } : {}),
@@ -530,13 +561,13 @@ function Index() {
           item.file.name,
           clean,
           activeJd,
-          settings.defaultRole,
+          effectiveRole,
         );
       } finally {
         clearInterval(timer);
       }
     },
-    [patch, settings, useJd, jd, ruleBasedOnly, maxRetries],
+    [patch, settings, systemInfo, useJd, jd, roleTitle, ruleBasedOnly, maxRetries],
   );
 
   const runBatch = useCallback(() => {
@@ -1174,9 +1205,15 @@ function Index() {
               onExportMdSelected: doExportMd,
               onOpen: setDrawerId,
               onExportPdf: (id) => void exportPdf(id),
+              onCompareSelected: handleCompare,
+              onDraftEmail: handleDraftEmail,
               setDragging,
             }}
             control={{
+              roleTitle,
+              setRoleTitle,
+              defaultAdminRole: systemInfo.defaultRole,
+              defaultAdminJd: systemInfo.defaultJd,
               useJd,
               setUseJd,
               jd,
@@ -1201,18 +1238,26 @@ function Index() {
               </h1>
               <p className="text-sm text-muted-foreground">
                 All {stats.doneRows.length} assessed resumes ranked by final score. Use this to
-                shortlist and compare at a glance.
+                shortlist, compare, and draft communications at a glance.
               </p>
             </div>
+
+            {stats.doneRows.length > 0 && (
+              <BatchAnalytics analyses={stats.doneRows} />
+            )}
+
             <Leaderboard
               rows={stats.doneRows}
               onOpen={setDrawerId}
+              onExportPdf={(id) => void exportPdf(id)}
               onExportCsvSelected={doExportCsv}
               onExportMdSelected={doExportMd}
               onDelete={deleteItem}
               onDeleteMany={deleteManyItems}
               onReevaluate={(id) => reanalyzeWithCurrentJd([id])}
               onReevaluateMany={(ids) => reanalyzeWithCurrentJd(ids)}
+              onCompareSelected={handleCompare}
+              onDraftEmail={handleDraftEmail}
               hasActiveJd={hasActiveJd}
               shortlistCutoff={shortlistCutoff}
               onShortlistCutoffChange={setShortlistCutoff}
@@ -1228,9 +1273,28 @@ function Index() {
         onApply={applyRectify}
         onReanalyze={reanalyzeOne}
         onExportPdf={(id) => void exportPdf(id)}
+        onDraftEmail={(analysis) => {
+          setEmailTarget(analysis);
+          setEmailOpen(true);
+        }}
         onDelete={deleteItem}
         hasActiveJd={hasActiveJd}
         onReanalyzeWithJd={(id) => reanalyzeWithCurrentJd([id])}
+      />
+
+      <CandidateComparator
+        candidates={compareCandidates}
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        onSelectCandidate={(id) => setDrawerId(id)}
+      />
+
+      <EmailDraftModal
+        analysis={emailTarget}
+        roleTitle={roleTitle || systemInfo.defaultRole || "Software Engineer"}
+        companyName={settings.companyName || "our hiring team"}
+        open={emailOpen}
+        onOpenChange={setEmailOpen}
       />
     </main>
   );
@@ -1310,9 +1374,15 @@ function AnalyzeView({
     onExportMdSelected?: (rows: import("@/components/MasterTable").MasterRow[]) => void;
     onOpen: (id: string) => void;
     onExportPdf: (id: string) => void;
+    onCompareSelected?: (rows: import("@/components/MasterTable").MasterRow[]) => void;
+    onDraftEmail?: (row: import("@/components/MasterTable").MasterRow) => void;
     setDragging: (v: boolean) => void;
   };
   control: {
+    roleTitle: string;
+    setRoleTitle: (v: string) => void;
+    defaultAdminRole?: string;
+    defaultAdminJd?: string;
     useJd: boolean;
     setUseJd: (v: boolean) => void;
     jd: string;
@@ -1330,6 +1400,14 @@ function AnalyzeView({
   };
 }) {
   const dragging = useRef(false);
+  const effectiveRoleDisplay =
+    control.roleTitle.trim() ||
+    control.defaultAdminRole ||
+    "Software Engineer (Entry Level)";
+
+  const isUsingCustomJd = control.useJd && control.jd.trim();
+  const isUsingAdminJd = !isUsingCustomJd && Boolean(control.defaultAdminJd && control.defaultAdminJd.trim());
+
   return (
     <div className="space-y-8">
       <div className="space-y-1.5">
@@ -1391,25 +1469,84 @@ function AnalyzeView({
                   htmlFor="jd-toggle"
                   className="text-xs font-semibold text-foreground cursor-pointer"
                 >
-                  Match Against Target Job Description (JD)
+                  Custom Job Description (JD) &amp; Role Targeting
                 </Label>
               </div>
-              <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                  {isUsingCustomJd ? (
+                    <Badge variant="secondary" className="text-[10px] bg-primary/15 text-primary border-primary/30">
+                      Custom JD Active
+                    </Badge>
+                  ) : isUsingAdminJd ? (
+                    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+                      Admin Default JD: {control.defaultAdminRole}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] bg-secondary text-muted-foreground">
+                      Global SDE Benchmark
+                    </Badge>
+                  )}
+                </span>
+                <Switch id="jd-toggle" checked={control.useJd} onCheckedChange={control.setUseJd} />
+              </div>
             </div>
 
-            {control.useJd && (
-              <div className="space-y-2 pt-1 animate-in fade-in slide-in-from-top-1">
-                <p className="text-[11px] text-muted-foreground">
-                  Paste the hiring requirements or JD below. The engine will evaluate each
-                  candidate's exact fit, missing skills, and calculate a dedicated JD Match %.
-                </p>
-                <Textarea
-                  value={control.jd}
-                  onChange={(e) => control.setJd(e.target.value)}
-                  placeholder="Paste Job Description, core requirements, and required skills here..."
-                  rows={4}
-                  className="text-xs font-mono bg-background/50 resize-y"
-                />
+            {control.useJd ? (
+              <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-1">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-semibold text-muted-foreground">
+                      1-Click Industry Role Presets:
+                    </Label>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {JD_PRESETS.map((p) => (
+                      <Button
+                        key={p.id}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[10px] font-semibold rounded-md bg-secondary/40 hover:bg-primary/10 hover:text-primary hover:border-primary/40 text-muted-foreground border-border/80"
+                        onClick={() => {
+                          control.setRoleTitle(p.roleTitle);
+                          control.setJd(p.description);
+                          toast.success(`Applied preset: ${p.roleTitle}`);
+                        }}
+                      >
+                        {p.category}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="role-name-input" className="text-[11px] font-semibold text-foreground">
+                    Target Role Name / Title
+                  </Label>
+                  <Input
+                    id="role-name-input"
+                    value={control.roleTitle}
+                    onChange={(e) => control.setRoleTitle(e.target.value)}
+                    placeholder={`e.g. ${effectiveRoleDisplay}`}
+                    className="text-xs bg-background/50 h-8"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="jd-textarea-input" className="text-[11px] font-semibold text-foreground">
+                    Job Description (JD) &amp; Requirements
+                  </Label>
+                  <Textarea
+                    id="jd-textarea-input"
+                    value={control.jd}
+                    onChange={(e) => control.setJd(e.target.value)}
+                    placeholder="Paste Job Description, core requirements, and required skills here..."
+                    rows={4}
+                    className="text-xs font-mono bg-background/50 resize-y"
+                  />
+                </div>
+
                 {stats.done > 0 && control.jd.trim() && (
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] text-muted-foreground">
@@ -1427,6 +1564,14 @@ function AnalyzeView({
                   </div>
                 )}
               </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {isUsingAdminJd ? (
+                  <>Currently evaluating against Admin Default JD for <strong className="text-foreground">{control.defaultAdminRole}</strong>. Turn on the toggle above to override with a custom JD.</>
+                ) : (
+                  <>Currently evaluating against <strong className="text-foreground">Global SDE Benchmark ({effectiveRoleDisplay})</strong>. Turn on the toggle above to evaluate against a specific JD.</>
+                )}
+              </p>
             )}
           </div>
         </section>
@@ -1800,6 +1945,8 @@ function AnalyzeView({
             </div>
           </div>
 
+          <BatchAnalytics analyses={stats.doneRows} />
+
           <MasterTable
             rows={stats.doneRows}
             onOpen={handlers.onOpen}
@@ -1810,6 +1957,8 @@ function AnalyzeView({
             onDeleteMany={handlers.onDeleteMany}
             onReevaluate={handlers.onReevaluate}
             onReevaluateMany={handlers.onReevaluateMany}
+            onCompareSelected={handlers.onCompareSelected}
+            onDraftEmail={handlers.onDraftEmail}
             hasActiveJd={Boolean(control.useJd && control.jd.trim())}
             shortlistCutoff={control.shortlistCutoff}
             onShortlistCutoffChange={control.setShortlistCutoff}

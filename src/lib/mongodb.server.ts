@@ -10,26 +10,34 @@ function isValidMongoUri(uri?: string | null): boolean {
   return trimmed.startsWith("mongodb://") || trimmed.startsWith("mongodb+srv://");
 }
 
-async function readEnvFallback(): Promise<string | null> {
-  // If running in Node.js runtime and process.env is not yet populated by Vite/dotenv
+function readEnvSync(): Record<string, string> {
+  const result: Record<string, string> = {};
   try {
     if (typeof window === "undefined" && typeof process !== "undefined" && process.cwd) {
-      const fs = await import("node:fs");
-      const path = await import("node:path");
+      const fs = require("node:fs");
+      const path = require("node:path");
       const envPath = path.resolve(process.cwd(), ".env");
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/^MONGODB_URI=(.*)$/m) || content.match(/^VITE_MONGODB_URI=(.*)$/m);
-        if (match && match[1]) {
-          const raw = match[1].trim().replace(/^["']|["']$/g, "");
-          if (isValidMongoUri(raw)) return raw;
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx > 0) {
+            const k = trimmed.slice(0, eqIdx).trim();
+            const v = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+            result[k] = v;
+            if (process.env && !process.env[k]) {
+              process.env[k] = v;
+            }
+          }
         }
       }
     }
   } catch {
-    // Ignore fallback errors
+    /* ignore fallback */
   }
-  return null;
+  return result;
 }
 
 export function getMongoUri(): string | null {
@@ -38,6 +46,11 @@ export function getMongoUri(): string | null {
     if (isValidMongoUri(rawUri)) {
       return rawUri!.trim();
     }
+  }
+  const fileEnv = readEnvSync();
+  const fileUri = fileEnv["MONGODB_URI"] || fileEnv["VITE_MONGODB_URI"];
+  if (isValidMongoUri(fileUri)) {
+    return fileUri.trim();
   }
   return null;
 }
@@ -56,7 +69,7 @@ export function getDatabaseNameFromUri(uri: string): string {
 }
 
 async function getConnectedClient(): Promise<MongoClient> {
-  const uri = getMongoUri();
+  let uri = getMongoUri();
   if (!uri) {
     throw new Error(
       "MongoDB is not configured. Please set the MONGODB_URI environment variable in your .env file.",

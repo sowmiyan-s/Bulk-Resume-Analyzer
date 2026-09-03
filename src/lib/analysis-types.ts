@@ -575,11 +575,11 @@ function toSectionAudits(v: unknown, breakdown: ScoreRow[]): SectionAudits {
       max: 5,
       audit: str(
         pick(cerRaw, "audit", "critique", "assessment"),
-        "Evaluated verifiable vendor/cloud accreditations (AWS, GCP, Azure, Oracle, Cisco, Kubernetes).",
+        "Evaluated technical accreditations and courses (e.g. AWS, Azure, Google Cloud, Oracle, Docker, Coursera, HackerRank).",
       ),
       fixTip: str(
         pick(cerRaw, "fix_tip", "fixTip", "tip", "recommendation"),
-        "Include verifiable credential IDs, issue dates, and credential links for verified cloud certifications.",
+        "List relevant certifications that align with your target job role or project tech stack.",
       ),
       verifiedCount: clamp(num(pick(cerRaw, "verified_count", "verifiedCount", "count"), 1), 0, 10),
     },
@@ -777,14 +777,21 @@ export function normalizeAnalysis(
       }
     }
 
-    // 2. Add missing sections
+    // 2. Add missing sections (Only for mandatory sections: Projects, Skills, Contact)
     if (ats?.metrics.sectionsMissing.length) {
       for (const s of ats.metrics.sectionsMissing) {
-        if (s === "Experience / Internships" && ats.metrics.sectionsFound.includes("Projects")) {
+        if (
+          s === "Experience / Internships" &&
+          (ats.metrics.sectionsFound.includes("Projects") || (ats.metrics.bullets ?? 0) >= 4)
+        ) {
+          continue;
+        }
+        // Education, Certifications, and Achievements are strictly optional
+        if (s.includes("Education") || s.includes("Certifications") || s.includes("Achievements") || s.includes("Extracurricular")) {
           continue;
         }
         criticalIssues.push({
-          severity: s === "Projects" || s === "Education" || s === "Skills" ? "critical" : "major",
+          severity: s.includes("Projects") || s.includes("Skills") ? "critical" : "major",
           area: "Missing Section",
           problem: `Dedicated ${s} section is missing from the resume.`,
           evidence: `Resume does not contain a recognizable '${s}' header`,
@@ -1050,11 +1057,11 @@ export function createRuleBasedAnalysis(
     switch (k.id) {
       case "dates":
         return {
-          severity: "critical",
+          severity: "major",
           area: "Missing Date Spans",
-          problem: "Experience or education entries lack clear date ranges (e.g. 'Aug 2022 – May 2024' or '2023 – Present').",
-          evidence: "Single standalone years or undated entries prevent ATS parsers from establishing a career timeline.",
-          fix: "Add explicit start and end dates (e.g., '06/2023 – 08/2023') to each internship, project, and educational degree.",
+          problem: "Experience entries lack clear date ranges (e.g. 'Aug 2023 – Nov 2023' or '2024 – Present').",
+          evidence: "Explicit date ranges help ATS parsers calculate total practical tenure accurately.",
+          fix: "Add explicit month/year date ranges to your internship and employment entries.",
         };
       case "verbs":
         return {

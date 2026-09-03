@@ -18,6 +18,7 @@ import {
   Layers,
   LayoutDashboard,
   Lightbulb,
+  Mail,
   RefreshCw,
   Sparkles,
   SpellCheck,
@@ -68,6 +69,7 @@ type Props = {
   onReanalyze: (id: string) => void;
   onExportPdf: (id: string) => void;
   onDelete?: (id: string) => void;
+  onDraftEmail?: (analysis: Analysis) => void;
   hasActiveJd?: boolean;
   onReanalyzeWithJd?: (id: string) => void;
 };
@@ -96,6 +98,7 @@ export function RectifyDrawer({
   onReanalyze,
   onExportPdf,
   onDelete,
+  onDraftEmail,
   hasActiveJd,
   onReanalyzeWithJd,
 }: Props) {
@@ -356,6 +359,17 @@ export function RectifyDrawer({
               >
                 <Copy className="size-3.5 mr-1.5 text-primary" /> Copy Review
               </Button>
+              {onDraftEmail && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs font-semibold rounded-lg border-primary/40 text-primary hover:bg-primary/10"
+                  onClick={() => onDraftEmail(a)}
+                  title="Share candidate analysis result report via email"
+                >
+                  <Mail className="size-3.5 mr-1.5 text-primary" /> Share Report
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="default"

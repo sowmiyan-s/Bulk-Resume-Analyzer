@@ -26,9 +26,13 @@ export interface StoredMongoAnalysis {
   clean_text?: string;
   raw_text?: string;
   analysis: Analysis;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_from?: string;
 }
 
 export interface AdminSystemSettings {
+  openaiApiKey?: string;
   qwenApiKey?: string;
   groqApiKey?: string;
   cerebrasApiKey?: string;
@@ -36,6 +40,7 @@ export interface AdminSystemSettings {
   geminiApiKey?: string;
   nvidiaApiKey?: string;
   defaultRole?: string;
+  defaultJd?: string;
   companyName?: string;
   defaultModelId?: string;
   updatedAt?: string;
@@ -134,6 +139,7 @@ export async function saveAnalysisMongo(data: {
       col.createIndex({ file_name: 1 }),
       col.createIndex({ overall_score: -1 }),
       col.createIndex({ created_at: -1 }),
+      col.createIndex({ is_deleted: 1 }),
     ]);
 
     const now = new Date().toISOString();
@@ -151,6 +157,8 @@ export async function saveAnalysisMongo(data: {
       clean_text: data.cleanText || "",
       raw_text: data.rawText || "",
       analysis: data.analysis,
+      is_deleted: false,
+      deleted_at: null,
     };
 
     // Match by file_name first (case-insensitive) or id to prevent duplicate entries for the same resume
@@ -176,18 +184,26 @@ export async function saveAnalysisMongo(data: {
 }
 
 /** Load all analysis records directly from MongoDB with strict file_name deduplication */
-export async function loadAnalysesMongo(): Promise<{
+export async function loadAnalysesMongo(options?: {
+  includeDeleted?: boolean;
+}): Promise<{
   success: boolean;
   items: Array<Omit<StoredMongoAnalysis, "_id">>;
+  stats?: {
+    total: number;
+    active: number;
+    deleted: number;
+  };
   error?: string;
 }> {
   try {
     const db = await getDb();
     const col = db.collection<StoredMongoAnalysis>("analyses");
+    const filter = options?.includeDeleted ? {} : { is_deleted: { $ne: true } };
     const docs = await col
-      .find({})
+      .find(filter)
       .sort({ updated_at: -1, created_at: -1 })
-      .limit(1000)
+      .limit(2000)
       .toArray();
 
     // Deduplicate docs by file_name so each resume only ever appears once
@@ -200,25 +216,45 @@ export async function loadAnalysesMongo(): Promise<{
       }
     }
 
-    // Clean serialization mapping
-    const items = Array.from(seenFiles.values()).map((d) => ({
-      id: d.id,
-      file_name: d.file_name || "candidate.pdf",
-      candidate_name: d.candidate_name || "Unnamed candidate",
-      role: d.role || "—",
-      overall_score: typeof d.overall_score === "number" ? d.overall_score : 0,
-      readiness_tier: d.readiness_tier || "Tier 3: Overhaul Required",
-      evaluation_basis: d.evaluation_basis || "role-fit",
-      assumed_role: d.assumed_role || "",
-      jd_score: typeof d.jd_score === "number" ? d.jd_score : null,
-      created_at: d.created_at || new Date().toISOString(),
-      updated_at: d.updated_at || d.created_at || new Date().toISOString(),
-      clean_text: d.clean_text || "",
-      raw_text: d.raw_text || "",
-      analysis: d.analysis,
-    }));
+    let activeCount = 0;
+    let deletedCount = 0;
 
-    return { success: true, items };
+    // Clean serialization mapping
+    const items = Array.from(seenFiles.values()).map((d) => {
+      const isDel = Boolean(d.is_deleted);
+      if (isDel) deletedCount++;
+      else activeCount++;
+
+      return {
+        id: d.id,
+        file_name: d.file_name || "candidate.pdf",
+        candidate_name: d.candidate_name || "Unnamed candidate",
+        role: d.role || "—",
+        overall_score: typeof d.overall_score === "number" ? d.overall_score : 0,
+        readiness_tier: d.readiness_tier || "Tier 3: Overhaul Required",
+        evaluation_basis: d.evaluation_basis || "role-fit",
+        assumed_role: d.assumed_role || "",
+        jd_score: typeof d.jd_score === "number" ? d.jd_score : null,
+        created_at: d.created_at || new Date().toISOString(),
+        updated_at: d.updated_at || d.created_at || new Date().toISOString(),
+        clean_text: d.clean_text || "",
+        raw_text: d.raw_text || "",
+        analysis: d.analysis,
+        is_deleted: isDel,
+        deleted_at: d.deleted_at || null,
+        deleted_from: d.deleted_from || undefined,
+      };
+    });
+
+    return {
+      success: true,
+      items,
+      stats: {
+        total: items.length,
+        active: activeCount,
+        deleted: deletedCount,
+      },
+    };
   } catch (err) {
     console.error("[MongoDB] Failed to load analyses:", err);
     const msg = err instanceof Error ? err.message : String(err);
@@ -226,16 +262,34 @@ export async function loadAnalysesMongo(): Promise<{
   }
 }
 
-/** Delete single analysis directly from MongoDB */
+/** Delete single analysis directly from MongoDB (Soft delete preserves history for Admin, permanent if master pass provided) */
 export async function deleteAnalysisMongo(data: {
   id: string;
   passcode?: string;
+  permanent?: boolean;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
     const db = await getDb();
     const col = db.collection("analyses");
-    await col.deleteOne({ id: data.id });
-    return { success: true, message: "Record deleted from MongoDB." };
+
+    if (data.permanent && checkAdminPassword(data.passcode)) {
+      await col.deleteOne({ id: data.id });
+      return { success: true, message: "Record permanently purged from MongoDB Atlas." };
+    }
+
+    // Soft delete: keep complete analysis history & metadata for Admin Panel review
+    const source = data.passcode && checkAdminPassword(data.passcode) ? "admin" : "home";
+    await col.updateOne(
+      { id: data.id },
+      {
+        $set: {
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          deleted_from: source,
+        },
+      },
+    );
+    return { success: true, message: "Record removed from Home and preserved in Admin History." };
   } catch (err) {
     console.error("[MongoDB] Failed to delete analysis:", err);
     const msg = err instanceof Error ? err.message : String(err);
@@ -247,12 +301,28 @@ export async function deleteAnalysisMongo(data: {
 export async function deleteManyAnalysesMongo(data: {
   ids: string[];
   passcode?: string;
+  permanent?: boolean;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
     const db = await getDb();
     const col = db.collection("analyses");
-    await col.deleteMany({ id: { $in: data.ids } });
-    return { success: true, message: `Deleted ${data.ids.length} records from MongoDB.` };
+
+    if (data.permanent && checkAdminPassword(data.passcode)) {
+      const res = await col.deleteMany({ id: { $in: data.ids } });
+      return { success: true, message: `Permanently purged ${res.deletedCount} records from MongoDB.` };
+    }
+
+    // Soft delete: keep records in admin archive
+    const now = new Date().toISOString();
+    const source = data.passcode && checkAdminPassword(data.passcode) ? "admin" : "home";
+    const res = await col.updateMany(
+      { id: { $in: data.ids } },
+      { $set: { is_deleted: true, deleted_at: now, deleted_from: source } },
+    );
+    return {
+      success: true,
+      message: `Archived ${res.modifiedCount} records from Home to Admin History.`,
+    };
   } catch (err) {
     console.error("[MongoDB] Failed to delete analyses:", err);
     const msg = err instanceof Error ? err.message : String(err);
@@ -264,14 +334,94 @@ export async function deleteManyAnalysesMongo(data: {
 export async function clearAnalysesMongo(data?: {
   adminPass?: string;
   passcode?: string;
+  permanent?: boolean;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
     const db = await getDb();
     const col = db.collection("analyses");
-    await col.deleteMany({});
-    return { success: true, message: "Cleared all analyses in MongoDB." };
+    const pass = data?.passcode || data?.adminPass;
+
+    if (data?.permanent && checkAdminPassword(pass)) {
+      await col.deleteMany({});
+      return { success: true, message: "Permanently cleared all analyses in MongoDB." };
+    }
+
+    // Soft clear: mark all active records as deleted from home
+    const now = new Date().toISOString();
+    const source = pass && checkAdminPassword(pass) ? "admin" : "home";
+    const res = await col.updateMany(
+      { is_deleted: { $ne: true } },
+      { $set: { is_deleted: true, deleted_at: now, deleted_from: source } },
+    );
+    return {
+      success: true,
+      message: `Archived ${res.modifiedCount} active records to Admin History.`,
+    };
   } catch (err) {
     console.error("[MongoDB] Failed to clear analyses:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Restore single analysis back to active (Home page visible) */
+export async function restoreAnalysisMongo(data: {
+  id: string;
+  passcode?: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    await col.updateOne(
+      { id: data.id },
+      { $set: { is_deleted: false, deleted_at: null, updated_at: new Date().toISOString() } },
+    );
+    return { success: true, message: "Candidate record restored to Home page." };
+  } catch (err) {
+    console.error("[MongoDB] Failed to restore analysis:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Restore multiple analyses back to active */
+export async function restoreManyAnalysesMongo(data: {
+  ids: string[];
+  passcode?: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    const res = await col.updateMany(
+      { id: { $in: data.ids } },
+      { $set: { is_deleted: false, deleted_at: null, updated_at: new Date().toISOString() } },
+    );
+    return { success: true, message: `Restored ${res.modifiedCount} candidate records to Home page.` };
+  } catch (err) {
+    console.error("[MongoDB] Failed to restore analyses:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/** Master Purge: Permanently remove only deleted records from MongoDB */
+export async function purgeDeletedAnalysesMongo(data: {
+  passcode: string;
+}): Promise<{ success: boolean; count?: number; message?: string; error?: string }> {
+  if (!checkAdminPassword(data.passcode)) {
+    return { success: false, error: "Invalid admin passcode." };
+  }
+  try {
+    const db = await getDb();
+    const col = db.collection("analyses");
+    const res = await col.deleteMany({ is_deleted: true });
+    return {
+      success: true,
+      count: res.deletedCount,
+      message: `Permanently deleted ${res.deletedCount} archived records from MongoDB Atlas.`,
+    };
+  } catch (err) {
+    console.error("[MongoDB] Failed to purge deleted analyses:", err);
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
   }
@@ -296,6 +446,9 @@ export async function saveAdminSettings(data: {
       updatedAt: new Date().toISOString(),
     };
 
+    if (data.settings.openaiApiKey !== undefined && !isMasked(data.settings.openaiApiKey)) {
+      updateData["openaiApiKey"] = encryptSecret(data.settings.openaiApiKey.trim());
+    }
     if (data.settings.qwenApiKey !== undefined && !isMasked(data.settings.qwenApiKey)) {
       updateData["qwenApiKey"] = encryptSecret(data.settings.qwenApiKey.trim());
     }
@@ -316,6 +469,9 @@ export async function saveAdminSettings(data: {
     }
     if (data.settings.defaultRole !== undefined) {
       updateData["defaultRole"] = data.settings.defaultRole.trim();
+    }
+    if (data.settings.defaultJd !== undefined) {
+      updateData["defaultJd"] = data.settings.defaultJd.trim();
     }
     if (data.settings.companyName !== undefined) {
       updateData["companyName"] = data.settings.companyName.trim();
@@ -355,6 +511,13 @@ export async function getAdminSettings(data: { passcode: string }): Promise<{
 
     const count = await db.collection("analyses").countDocuments().catch(() => 0);
     const ping = await pingMongo();
+
+    const openaiKey =
+      decryptSecret((config?.["openaiApiKey"] as string | undefined)?.trim()) ||
+      (typeof process !== "undefined" &&
+        process.env &&
+        (process.env["OPENAI_API_KEY"] || process.env["VITE_OPENAI_API_KEY"])) ||
+      "";
 
     const qwenKey =
       decryptSecret((config?.["qwenApiKey"] as string | undefined)?.trim()) ||
@@ -401,6 +564,7 @@ export async function getAdminSettings(data: { passcode: string }): Promise<{
     return {
       success: true,
       settings: {
+        openaiApiKey: maskSecret(openaiKey),
         qwenApiKey: maskSecret(qwenKey),
         groqApiKey: maskSecret(groqKey),
         cerebrasApiKey: maskSecret(cerebrasKey),
@@ -409,6 +573,7 @@ export async function getAdminSettings(data: { passcode: string }): Promise<{
         geminiApiKey: maskSecret(geminiKey),
         defaultRole:
           (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
+        defaultJd: (config?.["defaultJd"] as string | undefined) || "",
         companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
         defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
         updatedAt: (config?.["updatedAt"] as string | undefined) || "",
@@ -431,6 +596,7 @@ export async function getAdminSettings(data: { passcode: string }): Promise<{
         nvidiaApiKey: "",
         geminiApiKey: "",
         defaultRole: "Software Engineer (Entry Level)",
+        defaultJd: "",
         companyName: "the hiring company",
         updatedAt: "",
       },
@@ -452,6 +618,7 @@ export async function getPublicSystemInfo(): Promise<{
   hasServerNvidiaKey: boolean;
   hasServerGeminiKey: boolean;
   defaultRole: string;
+  defaultJd: string;
   companyName: string;
   defaultModelId: string;
   databaseConnected: boolean;
@@ -513,6 +680,7 @@ export async function getPublicSystemInfo(): Promise<{
       hasServerGeminiKey,
       defaultRole:
         (config?.["defaultRole"] as string | undefined) || "Software Engineer (Entry Level)",
+      defaultJd: (config?.["defaultJd"] as string | undefined) || "",
       companyName: (config?.["companyName"] as string | undefined) || "the hiring company",
       defaultModelId: (config?.["defaultModelId"] as string | undefined) || "",
       databaseConnected: true,
@@ -548,6 +716,7 @@ export async function getPublicSystemInfo(): Promise<{
       hasServerNvidiaKey: hasEnvNvidia,
       hasServerGeminiKey: hasEnvGemini,
       defaultRole: "Software Engineer (Entry Level)",
+      defaultJd: "",
       companyName: "the hiring company",
       defaultModelId: "",
       databaseConnected: false,
@@ -809,21 +978,33 @@ export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => saveAnalysisMongo(data));
 
-export const loadAnalysesMongoFn = createServerFn({ method: "GET" }).handler(async () =>
-  loadAnalysesMongo(),
-);
+export const loadAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data?: { includeDeleted?: boolean }) => data)
+  .handler(async ({ data }) => loadAnalysesMongo(data));
 
 export const deleteAnalysisMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { id: string; passcode?: string }) => data)
+  .validator((data: { id: string; passcode?: string; permanent?: boolean }) => data)
   .handler(async ({ data }) => deleteAnalysisMongo(data));
 
 export const deleteManyAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { ids: string[]; passcode?: string }) => data)
+  .validator((data: { ids: string[]; passcode?: string; permanent?: boolean }) => data)
   .handler(async ({ data }) => deleteManyAnalysesMongo(data));
 
 export const clearAnalysesMongoFn = createServerFn({ method: "POST" })
-  .validator((data: { adminPass?: string; passcode?: string }) => data)
+  .validator((data: { adminPass?: string; passcode?: string; permanent?: boolean }) => data)
   .handler(async ({ data }) => clearAnalysesMongo(data));
+
+export const restoreAnalysisMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { id: string; passcode?: string }) => data)
+  .handler(async ({ data }) => restoreAnalysisMongo(data));
+
+export const restoreManyAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { ids: string[]; passcode?: string }) => data)
+  .handler(async ({ data }) => restoreManyAnalysesMongo(data));
+
+export const purgeDeletedAnalysesMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { passcode: string }) => data)
+  .handler(async ({ data }) => purgeDeletedAnalysesMongo(data));
 
 export const verifyAdminPassFn = createServerFn({ method: "POST" })
   .validator((data: { passcode: string }) => data)

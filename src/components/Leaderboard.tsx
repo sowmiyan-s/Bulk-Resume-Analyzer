@@ -5,9 +5,12 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  FileDown,
   FileSpreadsheet,
   Filter,
+  Mail,
   RefreshCw,
+  Scale,
   Sliders,
   Sparkles,
   Target,
@@ -66,24 +69,30 @@ function rankMedal(rank: number) {
 export function Leaderboard({
   rows,
   onOpen,
+  onExportPdf,
   onExportCsvSelected,
   onExportMdSelected,
   onDelete,
   onDeleteMany,
   onReevaluate,
   onReevaluateMany,
+  onCompareSelected,
+  onDraftEmail,
   hasActiveJd,
   shortlistCutoff = 75,
   onShortlistCutoffChange,
 }: {
   rows: LeaderRow[];
   onOpen: (id: string) => void;
+  onExportPdf?: ((id: string) => void) | undefined;
   onExportCsvSelected?: ((rows: LeaderRow[]) => void) | undefined;
   onExportMdSelected?: ((rows: LeaderRow[]) => void) | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDeleteMany?: ((ids: string[]) => void) | undefined;
   onReevaluate?: ((id: string) => void) | undefined;
   onReevaluateMany?: ((ids: string[]) => void) | undefined;
+  onCompareSelected?: ((rows: LeaderRow[]) => void) | undefined;
+  onDraftEmail?: ((row: LeaderRow) => void) | undefined;
   hasActiveJd?: boolean | undefined;
   shortlistCutoff?: number | undefined;
   onShortlistCutoffChange?: ((val: number) => void) | undefined;
@@ -474,6 +483,18 @@ export function Leaderboard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {onCompareSelected && selectedIds.size >= 2 && selectedIds.size <= 3 && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-xs font-semibold rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                onClick={() => onCompareSelected(selectedRows)}
+              >
+                <Scale className="size-3 mr-1.5" />
+                Compare Head-to-Head ({selectedIds.size})
+              </Button>
+            )}
+
             {onExportCsvSelected && (
               <Button
                 size="sm"
@@ -536,8 +557,8 @@ export function Leaderboard({
       )}
 
       <div className="panel overflow-hidden border border-border/80 rounded-2xl shadow-xs">
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="overflow-x-auto w-full">
+          <Table className="w-full min-w-[800px]">
             <TableHeader className="bg-secondary/30">
               <TableRow className="border-b border-border/80 hover:bg-transparent">
                 <TableHead className="w-12 px-3 text-center">
@@ -779,6 +800,30 @@ export function Leaderboard({
                             aria-label="Re-evaluate candidate"
                           >
                             <RefreshCw className="size-3.5" />
+                          </Button>
+                        )}
+                        {onExportPdf && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+                            onClick={() => onExportPdf(row.id)}
+                            title="Download candidate scorecard PDF"
+                            aria-label="Download candidate scorecard PDF"
+                          >
+                            <FileDown className="size-3.5" />
+                          </Button>
+                        )}
+                        {onDraftEmail && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            onClick={() => onDraftEmail(row)}
+                            title="Generate candidate email draft"
+                            aria-label="Generate candidate email draft"
+                          >
+                            <Mail className="size-3.5" />
                           </Button>
                         )}
                         {onDelete && (

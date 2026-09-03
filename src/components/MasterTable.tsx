@@ -9,12 +9,15 @@ import {
   FileDown,
   FileSpreadsheet,
   Filter,
+  Mail,
   RefreshCw,
+  Scale,
   Search,
   Sliders,
   Sparkles,
   Target,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 
@@ -66,6 +69,8 @@ export function MasterTable({
   onDeleteMany,
   onReevaluate,
   onReevaluateMany,
+  onCompareSelected,
+  onDraftEmail,
   hasActiveJd,
   shortlistCutoff = 75,
   onShortlistCutoffChange,
@@ -79,6 +84,8 @@ export function MasterTable({
   onDeleteMany?: ((ids: string[]) => void) | undefined;
   onReevaluate?: ((id: string) => void) | undefined;
   onReevaluateMany?: ((ids: string[]) => void) | undefined;
+  onCompareSelected?: ((rows: MasterRow[]) => void) | undefined;
+  onDraftEmail?: ((row: MasterRow) => void) | undefined;
   hasActiveJd?: boolean | undefined;
   shortlistCutoff?: number | undefined;
   onShortlistCutoffChange?: ((val: number) => void) | undefined;
@@ -479,6 +486,18 @@ export function MasterTable({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {onCompareSelected && selectedIds.size >= 2 && selectedIds.size <= 3 && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-xs font-semibold rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                onClick={() => onCompareSelected(selectedRows)}
+              >
+                <Scale className="size-3 mr-1.5" />
+                Compare Head-to-Head ({selectedIds.size})
+              </Button>
+            )}
+
             {onExportCsvSelected && (
               <Button
                 size="sm"
@@ -541,8 +560,8 @@ export function MasterTable({
       )}
 
       <div className="panel overflow-hidden border border-border/80 rounded-2xl shadow-xs">
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="overflow-x-auto w-full">
+          <Table className="w-full min-w-[800px]">
             <TableHeader className="bg-secondary/30">
               <TableRow className="border-b border-border/80 hover:bg-transparent">
                 <TableHead className="w-12 px-3 text-center">
@@ -785,6 +804,18 @@ export function MasterTable({
                         >
                           <FileDown className="size-3.5" />
                         </Button>
+                        {onDraftEmail && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            onClick={() => onDraftEmail(row)}
+                            title="Generate candidate email draft"
+                            aria-label="Generate candidate email draft"
+                          >
+                            <Mail className="size-3.5" />
+                          </Button>
+                        )}
                         {onDelete && (
                           <Button
                             size="icon"

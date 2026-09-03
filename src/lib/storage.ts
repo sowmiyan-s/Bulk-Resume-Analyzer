@@ -240,34 +240,15 @@ export function getInFlightIds(rows: StoredAnalysis[] = readLocal()): string[] {
 export async function loadAnalyses(): Promise<StoredAnalysis[]> {
   try {
     const { loadAnalysesMongoFn, saveAnalysisMongoFn } = await dbFns();
-    const res = await loadAnalysesMongoFn();
+    const res = await loadAnalysesMongoFn({ data: { includeDeleted: false } });
     if (res && res.success && Array.isArray(res.items)) {
       if (res.items.length > 0) {
-        // Merge with any local records and deduplicate strictly by file_name
-        const local = readLocal();
-        const combined = deduplicateStoredList([...(res.items as StoredAnalysis[]), ...local]);
-        writeLocal(combined);
-
-        // In background, sync any local-only records up to MongoDB Atlas
-        if (local.length > 0) {
-          for (const item of local) {
-            if (item.analysis) {
-              void saveAnalysisMongoFn({
-                data: {
-                  id: item.id,
-                  fileName: item.file_name,
-                  analysis: item.analysis,
-                  cleanText: item.clean_text,
-                  rawText: item.raw_text,
-                },
-              }).catch(() => {});
-            }
-          }
-        }
-
-        return combined;
+        // Active records from MongoDB
+        const mongoItems = res.items as StoredAnalysis[];
+        writeLocal(mongoItems);
+        return mongoItems;
       } else {
-        // MongoDB collection is currently empty; sync local cache to MongoDB
+        // MongoDB collection has no active analyses; sync local cache if present
         const local = deduplicateStoredList(readLocal());
         if (local.length > 0) {
           for (const item of local) {

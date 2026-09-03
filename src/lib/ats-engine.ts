@@ -194,27 +194,9 @@ const SECTION_PATTERNS: Array<{ id: string; label: string; re: RegExp; required:
     required: true,
   },
   {
-    id: "summary",
-    label: "Summary / Objective",
-    re: /\b(professional\s+|career\s+|executive\s+)?(summary|profile|objective|about\s+me|overview)\b/i,
-    required: false,
-  },
-  {
     id: "skills",
-    label: "Skills",
+    label: "Skills & Technologies",
     re: /\b(technical\s+|core\s+|key\s+|computer\s+|programming\s+)?(skills?|skillset|skill-set|technologies|tech\s+stack|competencies|proficiencies|languages\s*(&|and)\s*frameworks)\b/i,
-    required: true,
-  },
-  {
-    id: "experience",
-    label: "Experience / Internships",
-    re: /\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training)\b/i,
-    required: true,
-  },
-  {
-    id: "education",
-    label: "Education",
-    re: /\b(educational\s+|academic\s+|scholastic\s+)?(education|qualifications?|background|academics|degrees?)\b/i,
     required: true,
   },
   {
@@ -224,14 +206,32 @@ const SECTION_PATTERNS: Array<{ id: string; label: string; re: RegExp; required:
     required: true,
   },
   {
+    id: "experience",
+    label: "Experience / Internships",
+    re: /\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training)\b/i,
+    required: true,
+  },
+  {
+    id: "summary",
+    label: "Professional Summary",
+    re: /\b(professional\s+|career\s+|executive\s+)?(summary|profile|objective|about\s+me|overview)\b/i,
+    required: false,
+  },
+  {
+    id: "education",
+    label: "Education (Optional)",
+    re: /\b(educational\s+|academic\s+|scholastic\s+)?(education|qualifications?|background|academics|degrees?)\b/i,
+    required: false,
+  },
+  {
     id: "certifications",
-    label: "Certifications",
+    label: "Certifications (Optional)",
     re: /\b(certifications?|certificates?|licenses?|accreditations?|courses|trainings?\s*(&|and)\s*certifications?)\b/i,
     required: false,
   },
   {
     id: "achievements",
-    label: "Achievements",
+    label: "Achievements & Awards (Optional)",
     re: /\b(achievements?|awards?|honou?rs|accomplishments|extra[- ]?curricular|co[- ]?curricular|coding\s+profiles|hackathons?|publications?)\b/i,
     required: false,
   },
@@ -377,17 +377,29 @@ function containsAny(text: string, needles: string[]): string[] {
 
 function jdKeywords(jd: string): string[] {
   const explicitSkills = containsAny(jd, SKILL_TAXONOMY);
+  if (explicitSkills.length >= 3) {
+    return uniq(explicitSkills);
+  }
+  // If few explicit taxonomy skills were found, extract technical-looking tokens only (excluding generic English corporate words)
   const tokens = lc(jd)
     .replace(/[^a-z0-9+#./\s-]/g, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t) && !/^\d+$/.test(t));
+    .filter(
+      (t) =>
+        t.length >= 3 &&
+        !STOP_WORDS.has(t) &&
+        !/^\d+$/.test(t) &&
+        !/^(responsibilities|requirements|opportunity|experience|candidate|qualifications|position|role|company|working|looking|ability|knowledge|skills|understanding|team|teams|strong|excellent|good|years|degree|bachelor|master|plus|preferred|bonus|hands-on|environment|solutions|business|develop|build|design|support|create)$/i.test(
+          t,
+        ),
+    );
   const freq = new Map<string, number>();
   for (const t of tokens) freq.set(t, (freq.get(t) ?? 0) + 1);
   const top = Array.from(freq.entries())
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 30)
+    .slice(0, 10)
     .map(([t]) => t);
-  return uniq([...explicitSkills, ...top]).slice(0, 40);
+  return uniq([...explicitSkills, ...top]).slice(0, 15);
 }
 
 function check(
@@ -426,7 +438,7 @@ export function parseDocumentSections(text: string): ParsedDocument {
   };
 
   const isHeaderLine = (line: string): { isHeader: boolean; type: ParsedSectionType; title: string } => {
-    if (line.length > 55 || /^[-•*▪◦‣·–—>\d.]\s/.test(line)) {
+    if (line.length > 65 || /^[-•*▪◦‣·–—>\d.]\s/.test(line)) {
       return { isHeader: false, type: "other", title: "" };
     }
     const clean = line.replace(/^[#•\-\*|>:\s]+|[#•\-\*|>:\s]+$/g, "").trim();
@@ -435,16 +447,16 @@ export function parseDocumentSections(text: string): ParsedDocument {
     if (/\b(professional\s+|career\s+|executive\s+)?(summary|profile|objective|about\s+me|overview)\b/i.test(clean)) {
       return { isHeader: true, type: "summary", title: clean };
     }
-    if (/\b(technical\s+|core\s+|key\s+|computer\s+|programming\s+)?(skills?|skillset|skill-set|technologies|tech\s+stack|competencies|proficiencies|languages\s*(&|and)\s*frameworks)\b/i.test(clean)) {
+    if (/\b(technical\s+|core\s+|key\s+|computer\s+|programming\s+|software\s+|it\s+)?(skills?|skillset|skill-set|technologies|tech\s+stack|competencies|proficiencies|languages\s*(&|and)\s*frameworks|tools\s*(&|and)\s*technologies)\b/i.test(clean)) {
       return { isHeader: true, type: "skills", title: clean };
     }
-    if (/\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training)\b/i.test(clean)) {
+    if (/\b(work\s+|professional\s+|job\s+|practical\s+|relevant\s+|industrial\s+)?(experience|employment|internships?|work\s+history|job\s+history|training|work\s+experience)\b/i.test(clean)) {
       return { isHeader: true, type: "experience", title: clean };
     }
     if (/\b(educational\s+|academic\s+|scholastic\s+)?(education|qualifications?|background|academics|degrees?)\b/i.test(clean)) {
       return { isHeader: true, type: "education", title: clean };
     }
-    if (/\b(personal\s+|academic\s+|key\s+|technical\s+|selected\s+|notable\s+|major\s+|mini\s+|capstone\s+)?(projects?|project\s+work|initiatives)\b/i.test(clean)) {
+    if (/\b(personal\s+|academic\s+|key\s+|technical\s+|selected\s+|notable\s+|major\s+|mini\s+|capstone\s+|software\s+)?(projects?|project\s+work|project\s+details|project\s+experience|initiatives)\b/i.test(clean)) {
       return { isHeader: true, type: "projects", title: clean };
     }
     if (/\b(certifications?|certificates?|licenses?|accreditations?|courses|trainings?\s*(&|and)\s*certifications?)\b/i.test(clean)) {
@@ -573,7 +585,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   const skillsFound = containsAny(text, SKILL_TAXONOMY);
   const blockers: string[] = [];
 
-  /* --- 1. Parseability & contact (20) --- */
+  /* --- 1. Parseability & contact (20 max) --- */
   const hasEmail = /[\w.+-]+@[\w-]+\.[\w.]+/.test(text);
   const hasPhone = /(\+?\d[\d\s().-]{7,}\d)/.test(text);
   const hasLinkedIn = /linkedin\.com\/[a-z0-9-]+/i.test(text);
@@ -594,16 +606,16 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       "phone",
       "Phone number present",
       hasPhone,
-      hasPhone ? 4 : 0,
-      4,
+      hasPhone ? 5 : 0,
+      5,
       hasPhone ? "Phone number detected." : "No parsable phone number found.",
     ),
     check(
       "linkedin",
       "LinkedIn profile URL",
       hasLinkedIn,
-      hasLinkedIn ? 3 : 0,
-      3,
+      hasLinkedIn ? 5 : 0,
+      5,
       hasLinkedIn
         ? "LinkedIn URL present."
         : "No LinkedIn URL — recruiters cannot verify your profile.",
@@ -612,154 +624,20 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
       "portfolio",
       "GitHub / portfolio link",
       hasGithubOrPortfolio,
-      hasGithubOrPortfolio ? 4 : 0,
-      4,
+      hasGithubOrPortfolio ? 5 : 0,
+      5,
       hasGithubOrPortfolio
         ? "Verifiable code/portfolio link present."
         : "No GitHub or portfolio link — projects are unverifiable.",
     ),
-    check(
-      "textlayer",
-      "Extractable text layer",
-      words > 120,
-      words > 120 ? 4 : Math.max(0, words / 40),
-      4,
-      words > 120
-        ? `${words} words extracted cleanly.`
-        : `Only ${words} words extracted — likely a scanned image or graphics-heavy layout.`,
-    ),
   ];
-  if (!hasEmail) blockers.push("No email address detected — most ATS reject the file outright.");
-  if (words <= 120)
-    blockers.push("Very little machine-readable text — resume is likely image-based.");
+  if (!hasEmail) blockers.push("No email address detected — ATS cannot process candidate.");
+  if (words <= 80)
+    blockers.push("Very little machine-readable text — resume is likely image-based or blank.");
 
-  /* --- 2. Section structure (20) --- */
-  const requiredSections = SECTION_PATTERNS.filter((s) => s.required);
-  const requiredHit = requiredSections.filter((s) => parsed.sections.some((sec) => sec.type === s.id)).length;
-  const optionalHit = SECTION_PATTERNS.filter((s) => !s.required && parsed.sections.some((sec) => sec.type === s.id)).length;
-  const structureChecks: AtsCheck[] = [
-    check(
-      "req-sections",
-      "Standard ATS section headings",
-      requiredHit >= requiredSections.length - 1,
-      Math.min(12, (requiredHit / Math.max(1, requiredSections.length - 1)) * 12),
-      12,
-      `${requiredHit}/${requiredSections.length} core sections recognized (${sectionsFound.slice(0, 4).join(", ")}). Missing: ${
-        requiredSections
-          .filter((s) => !parsed.sections.some((sec) => sec.type === s.id))
-          .map((s) => s.label)
-          .join(", ") || "none"
-      }`,
-    ),
-    check(
-      "opt-sections",
-      "Supporting sections (certs / achievements / summary)",
-      optionalHit >= 1,
-      Math.min(4, Math.max(2, optionalHit * 2)),
-      4,
-      `${optionalHit}/3 supporting sections present.`,
-    ),
-    check(
-      "dates",
-      "Dated experience entries",
-      hasDateRange(text),
-      hasDateRange(text) ? 4 : 0,
-      4,
-      hasDateRange(text)
-        ? "Clear date ranges detected on experience entries."
-        : "Missing explicit date spans (e.g. '2023 - Present' or 'Jun 2022 - May 2024') on experience/education entries.",
-    ),
-  ];
-  if (requiredHit < 3) {
-    blockers.push(
-      "Multiple standard core sections missing — keyword parsers will mis-file your content.",
-    );
-  }
-
-  /* --- 3. Impact & writing quality (25) --- */
-  const quantRatio = bullets.length ? quantifiedBullets / bullets.length : 0;
-  const weakHits = containsAny(text, WEAK_PHRASES);
-  const firstPerson = (text.match(/\b(I|my|me)\b/g) ?? []).length;
-
-  // Qualification & Measurable Impact:
-  // Overwhelmed resumes (e.g. >15 bullets with <15% metrics) get heavily penalized for lack of verifiable proof
-  let quantScore = 0;
-  if (bullets.length === 0) {
-    quantScore = 0;
-  } else if (bullets.length <= 6) {
-    quantScore = Math.min(10, quantifiedBullets * 4 + (hasProofOfWork ? 2 : 0));
-  } else {
-    // Standard / High-bullet resume: ratio drives the score
-    const baseRatioScore = Math.min(8, Math.round(quantRatio * 22));
-    const bonusProof = hasProofOfWork ? 2 : 0;
-    quantScore = Math.min(10, Math.max(1, baseRatioScore + bonusProof));
-  }
-
-  const verbScore = Math.min(
-    6,
-    Math.max(
-      0,
-      ((parsed.powerVerbCount * 1.0 + parsed.standardVerbCount * 0.6) / Math.max(1, bullets.length * 0.7)) * 6 -
-        parsed.weakVerbBullets.length * 0.8,
-    ),
-  );
-
-  const impact: AtsCheck[] = [
-    check(
-      "bullets",
-      "Uses bullet points",
-      bullets.length >= 6,
-      Math.min(5, bullets.length * 0.5),
-      5,
-      `${bullets.length} bullet points detected across project & experience sections.`,
-    ),
-    check(
-      "quantified",
-      "Quantified achievements & verifiable proof",
-      quantRatio >= 0.25 || (bullets.length <= 6 && quantifiedBullets >= 2 && hasProofOfWork),
-      quantScore,
-      10,
-      hasProofOfWork
-        ? `${quantifiedBullets}/${bullets.length || 0} bullets with metrics (${Math.round(quantRatio * 100)}% density) + verifiable published artifacts/proof.`
-        : `${quantifiedBullets}/${bullets.length || 0} bullets contain measurable outcomes (${Math.round(quantRatio * 100)}% density).`,
-    ),
-    check(
-      "verbs",
-      "Bullets start with strong action verbs",
-      parsed.powerVerbCount >= 2 && parsed.weakVerbBullets.length === 0,
-      verbScore,
-      6,
-      parsed.weakVerbBullets.length > 0
-        ? `${parsed.powerVerbCount} power engineering verbs, but ${parsed.weakVerbBullets.length} passive phrase(s) detected (${parsed.weakVerbBullets.slice(0, 2).map((b) => '"' + b.slice(0, 30) + '…"').join(", ")}).`
-        : `${parsed.powerVerbCount} power engineering verbs and ${parsed.standardVerbCount} standard action verbs opening bullets.`,
-    ),
-    check(
-      "weak",
-      "Free of clichés and filler",
-      weakHits.length === 0,
-      Math.max(0, 2 - weakHits.length * 0.7),
-      2,
-      weakHits.length ? `Clichés found: ${weakHits.join(", ")}` : "No filler phrases detected.",
-    ),
-    check(
-      "person",
-      "Third-person / implied-subject voice",
-      firstPerson <= 2,
-      firstPerson <= 2 ? 2 : Math.max(0, 2 - firstPerson * 0.3),
-      2,
-      firstPerson <= 2
-        ? "No first-person narration."
-        : `${firstPerson} first-person pronouns ("I", "my") found.`,
-    ),
-  ];
-
-  /* --- 4. Skills & architecture depth (20) --- */
+  /* --- 2. Skills & JD Matching (30 max) --- */
   const hasCustomJd = Boolean(jobDescription && jobDescription.trim().length >= 5);
   const provenSkills = parsed.provenSkills;
-  const isKeywordStuffed = skillsFound.length >= 12 && provenSkills.length <= 2;
-  if (isKeywordStuffed) {
-    blockers.push(`Keyword stuffing detected: ${skillsFound.length} technical skills listed, but only ${provenSkills.length} applied in project bullets.`);
-  }
 
   const highBarSignals = containsAny(evidenceText, [
     "distributed systems", "concurrency", "multithreading", "event-driven", "microservices",
@@ -780,25 +658,17 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     kws = jdKeywords(jobDescription!);
     matched = kws.filter((k) => containsAny(text, [k]).length > 0);
     missing = kws.filter((k) => !matched.includes(k));
-    // JD coverage is evidence weighted: a keyword in a Skills list is weaker
-    // than the same keyword demonstrated in a project or experience bullet.
     const matchRatio = kws.length > 0 ? (matched.length / kws.length) : 1;
     bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
-    const bulletBonus = Math.min(12, bulletMatchedCount * 2.5);
-    jdScore = Math.min(100, Math.max(10, Math.round(matchRatio * 88 + bulletBonus)));
+    const bulletBonus = Math.min(15, bulletMatchedCount * 3);
+    jdScore = Math.min(100, Math.max(15, Math.round(matchRatio * 85 + bulletBonus)));
   } else {
-    // Global SDE Benchmark: Realistic 0-100 evaluation of technical depth, stack versatility, and engineering impact
-    const provenSkillScore = Math.min(25, provenSkills.length * 4);
-    const listedSkillScore = isKeywordStuffed ? 4 : Math.min(15, skillsFound.length * 1.5);
-    const skillBreadthScore = provenSkillScore + listedSkillScore;
-    const provenBulletScore = Math.min(30, (parsed.powerVerbCount * 3) + Math.round(quantRatio * 40));
-    const advancedSignalScore = Math.min(20, highBarSignals.length * 4);
-    const baselineBonus = hasProofOfWork ? 10 : 5;
-    const rawJd = skillBreadthScore + provenBulletScore + advancedSignalScore + baselineBonus;
-    jdScore = Math.min(98, Math.max(25, isKeywordStuffed ? rawJd - 15 : rawJd));
+    // Global SDE Benchmark: Evaluation of technical skills & versatility
+    const provenSkillScore = Math.min(30, provenSkills.length * 5 + skillsFound.length * 1.5);
+    jdScore = Math.min(98, Math.max(30, provenSkillScore + (hasProofOfWork ? 10 : 5)));
     kws = skillsFound;
     matched = skillsFound;
-    missing = []; // Do NOT fabricate arbitrary missing skills when no JD was provided
+    missing = [];
   }
 
   const skillChecks: AtsCheck[] = hasCustomJd
@@ -806,201 +676,187 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "jd-skills",
           "Target JD required skills & keywords match",
-          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)) &&
-            (bulletMatchedCount >= 1 || matched.length < 3),
+          matched.length >= Math.min(4, Math.ceil(kws.length * 0.35)),
           Math.min(
-            10,
+            15,
             kws.length
-              ? (matched.length / kws.length) * 6 +
-                  (matched.length ? (bulletMatchedCount / matched.length) * 4 : 0)
-              : 10,
+              ? (matched.length / kws.length) * 10 +
+                  (matched.length ? (bulletMatchedCount / matched.length) * 5 : 0)
+              : 15,
           ),
-          10,
+          15,
           `${matched.length}/${kws.length} JD keywords matched (${matched.slice(0, 8).join(", ")}${matched.length > 8 ? "…" : ""}). Missing: ${missing.slice(0, 5).join(", ") || "none"}.`,
         ),
         check(
           "skill-count",
-          "Technical skills applied in project context",
+          "Technical skills verified in project context",
           provenSkills.length >= 2,
-          Math.min(5, provenSkills.length * 1.5 + Math.min(2, skillsFound.length * 0.25)),
-          5,
+          Math.min(10, provenSkills.length * 2.5 + Math.min(4, skillsFound.length * 0.5)),
+          10,
           provenSkills.length > 0
-            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 5).join(", ")}).`
+            ? `${provenSkills.length} skills demonstrated in project/work bullets (${provenSkills.slice(0, 6).join(", ")}).`
             : `${skillsFound.length} technical skills found across resume.`,
         ),
         check(
-          "architecture-depth",
-          "Target role tooling & engineering proof",
-          highBarSignals.length >= 1 || matched.length >= 4,
-          Math.min(5, Math.max(2, (highBarSignals.length + (matched.length >= 4 ? 2 : 0)) * 1.5)),
+          "tooling",
+          "Modern frameworks, protocols & dev tooling",
+          highBarSignals.length >= 1 || skillsFound.length >= 4,
+          Math.min(5, Math.max(2, (highBarSignals.length * 2 + skillsFound.length * 0.5))),
           5,
-          highBarSignals.length > 0
-            ? `${highBarSignals.length} production signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
-            : "No production architecture signals detected.",
+          skillsFound.length > 0
+            ? `${skillsFound.length} technical tools/technologies recognized.`
+            : "No technical tools recognized.",
         ),
       ]
     : [
         check(
-          "skill-count",
-          "Technical skills verified in project bullets",
-          provenSkills.length >= 3 && !isKeywordStuffed,
-          Math.min(8, provenSkills.length * 1.8 + (isKeywordStuffed ? 0 : Math.min(2, skillsFound.length * 0.2))),
-          8,
-          provenSkills.length > 0
-            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 6).join(", ")}) out of ${skillsFound.length} recognized tools.${isKeywordStuffed ? " Overwhelmed skills list without project proof." : ""}`
-            : `${skillsFound.length} skills listed, but none verified in project/work bullets. Integrate tools into project descriptions.`,
+          "skill-breadth",
+          "Core technical skills & technologies",
+          skillsFound.length >= 4,
+          Math.min(15, skillsFound.length * 2.5),
+          15,
+          `${skillsFound.length} technical skills identified (${skillsFound.slice(0, 8).join(", ")}).`,
         ),
         check(
-          "architecture-depth",
-          "Production architecture & Tier-1 SDE signals",
-          highBarSignals.length >= 2,
-          Math.min(6, Math.max(2, highBarSignals.length * 1.5)),
-          6,
-          highBarSignals.length > 0
-            ? `${highBarSignals.length} production architecture signals detected (${highBarSignals.slice(0, 4).join(", ")}).`
-            : "No production architecture signals (Docker, Redis, microservices, concurrency, or packages) found.",
+          "skill-count",
+          "Technical skills verified in project bullets",
+          provenSkills.length >= 2,
+          Math.min(10, provenSkills.length * 3),
+          10,
+          provenSkills.length > 0
+            ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 6).join(", ")}).`
+            : `${skillsFound.length} skills listed. Integrate tools directly into project bullets.`,
         ),
         check(
           "tooling",
-          "Cloud / DevOps / testing tooling present",
-          containsAny(evidenceText, [
-            "aws",
-            "azure",
-            "gcp",
-            "docker",
-            "kubernetes",
-            "ci/cd",
-            "jenkins",
-            "github actions",
-            "pytest",
-            "jest",
-            "junit",
-            "terraform",
-            "git",
-          ]).length > 0,
-          Math.min(
-            6,
-            containsAny(evidenceText, [
-              "aws",
-              "azure",
-              "gcp",
-              "docker",
-              "kubernetes",
-              "ci/cd",
-              "jenkins",
-              "github actions",
-              "pytest",
-              "jest",
-              "junit",
-              "terraform",
-              "git",
-            ]).length * 1.5,
-          ),
-          6,
-          `${containsAny(evidenceText, ["aws", "azure", "gcp", "docker", "kubernetes", "ci/cd", "jenkins", "github actions", "pytest", "jest", "junit", "terraform", "git"]).length} delivery/testing tools demonstrated in experience or projects.`,
+          "Development, database & cloud tooling",
+          highBarSignals.length >= 1 || skillsFound.length >= 3,
+          Math.min(5, Math.max(2, highBarSignals.length * 2 + skillsFound.length * 0.5)),
+          5,
+          `${skillsFound.length} tools and technologies recognized.`,
         ),
       ];
 
-  /* --- 5. Length & formatting hygiene (15) --- */
-  const grammarAnalysis = analyzeGrammar(text);
-  const tooLong = longestBulletWords > 45;
-  const overwhelmedBullets = bullets.length > 20 && quantRatio < 0.15;
-  if (overwhelmedBullets) {
-    blockers.push(`Overwhelmed structure: ${bullets.length} bullets with only ${Math.round(quantRatio * 100)}% quantified outcomes. Uncalibrated text triggers recruiter fatigue.`);
-  }
-  const hasTableChars = hasTableLayout(lines);
-  const specialGlyphs = (text.match(/[^\x00-\x7F\u2018\u2019\u201c\u201d\u2013\u2014•₹]/g) ?? [])
-    .length;
-  const lengthOk = words >= 300 && words <= 900;
-  const fmt: AtsCheck[] = [
+  /* --- 3. Projects (At least 2 projects with good explanation) (25 max) --- */
+  const projectEntriesCount = parsed.projectEntries.length;
+  const hasProjectsSection = parsed.sections.some((s) => s.type === "projects");
+  const projectBulletsCount = parsed.sections
+    .filter((s) => s.type === "projects")
+    .reduce((acc, s) => acc + s.lines.filter((l) => /^[-•*▪◦‣·–—>]/.test(l) || l.length > 30).length, 0);
+
+  const hasAtLeastTwoProjects = projectEntriesCount >= 2 || (hasProjectsSection && projectBulletsCount >= 4);
+
+  const projectChecks: AtsCheck[] = [
     check(
-      "length",
-      "Appropriate length (roughly 1 page / 300-900 words)",
-      lengthOk,
-      lengthOk
-        ? 5
-        : words < 300
-          ? Math.max(0, (words / 300) * 5)
-          : Math.max(0, 5 - ((words - 900) / 300) * 3),
+      "project-count",
+      "At least 2 technical projects with good explanation",
+      hasAtLeastTwoProjects,
+      hasAtLeastTwoProjects
+        ? 12
+        : projectEntriesCount === 1 || projectBulletsCount >= 2
+          ? 7
+          : hasProjectsSection
+            ? 4
+            : 0,
+      12,
+      hasAtLeastTwoProjects
+        ? `${projectEntriesCount >= 2 ? `${projectEntriesCount} distinct projects` : "Substantial project section"} detailed with explanation and stack.`
+        : projectEntriesCount === 1
+          ? "Only 1 project found. Add at least 2 well-explained technical projects."
+          : "Missing dedicated projects section with detailed explanations.",
+    ),
+    check(
+      "project-depth",
+      "Project technical depth & measurable outcomes",
+      quantifiedBullets >= 2 || hasProofOfWork,
+      Math.min(8, Math.max(3, quantifiedBullets * 2 + (hasProofOfWork ? 3 : 0))),
+      8,
+      hasProofOfWork
+        ? `${quantifiedBullets} quantified metrics with verifiable proof/links.`
+        : `${quantifiedBullets} measurable outcomes and metrics in project descriptions.`,
+    ),
+    check(
+      "project-verbs",
+      "Action-oriented project descriptions",
+      parsed.powerVerbCount >= 1 || parsed.standardVerbCount >= 2,
+      Math.min(5, Math.max(2, parsed.powerVerbCount * 2 + parsed.standardVerbCount * 1)),
       5,
-      `${words} words ≈ ${estimatedPages} page(s).`,
-    ),
-    check(
-      "bulletlen",
-      "Bullets stay scannable (< 45 words)",
-      !tooLong,
-      tooLong ? 1 : 3,
-      3,
-      `Longest bullet is ${longestBulletWords} words; average ${readabilityWordsPerBullet}.`,
-    ),
-    check(
-      "tables",
-      "No tables / multi-column layout artefacts",
-      !hasTableChars,
-      hasTableChars ? 0 : 2,
-      2,
-      hasTableChars
-        ? "Table pipes detected — columns often scramble in ATS parsers."
-        : "No table or column artefacts.",
-    ),
-    check(
-      "glyphs",
-      "Clean character encoding (no OCR garbage)",
-      specialGlyphs < 20,
-      specialGlyphs < 20 ? 2 : Math.max(0, 2 - specialGlyphs / 60),
-      2,
-      specialGlyphs < 20
-        ? "Character encoding is clean."
-        : `${specialGlyphs} unusual glyphs — likely OCR noise.`,
-    ),
-    check(
-      "grammar",
-      "Grammar, spelling & phrasing hygiene",
-      grammarAnalysis.issues.length === 0,
-      Math.max(0, 3 - grammarAnalysis.scorePenalty * 0.3),
-      3,
-      grammarAnalysis.issues.length === 0
-        ? "Grammar and spelling are clean."
-        : `${grammarAnalysis.issues.length} grammar/typo issue(s) detected: ${grammarAnalysis.formattedList.slice(0, 2).join("; ")}`,
+      `${parsed.powerVerbCount} power engineering verbs and ${parsed.standardVerbCount} standard action verbs opening bullets.`,
     ),
   ];
-  if (hasTableChars)
-    blockers.push("Table/column layout detected — reformat to a single-column flow.");
-  if (tooLong)
-    blockers.push(`A ${longestBulletWords}-word bullet will be skimmed past by recruiters.`);
-  if (grammarAnalysis.issues.length >= 6)
-    blockers.push(`High number of grammar & spelling errors (${grammarAnalysis.issues.length} detected) will trigger recruiter rejection.`);
+
+  /* --- 4. Experience with Dates (15 max) --- */
+  const hasExpSection = parsed.sections.some((s) => s.type === "experience");
+  const hasDates = hasDateRange(text);
+  const expChecks: AtsCheck[] = [
+    check(
+      "dates",
+      "Dated work / internship experience entries",
+      hasDates,
+      hasDates ? 7 : hasExpSection ? 3 : 0,
+      7,
+      hasDates
+        ? "Explicit date ranges detected on experience entries."
+        : "Missing explicit date ranges (e.g. 'Jun 2023 - Aug 2023' or '2024 - Present').",
+    ),
+    check(
+      "exp-explanation",
+      "Clear explanation of experience & responsibilities",
+      hasExpSection || bullets.length >= 4,
+      hasExpSection ? 8 : Math.min(8, bullets.length * 1.5),
+      8,
+      hasExpSection
+        ? "Experience/internships section present with detailed responsibilities."
+        : "Experience integrated within project and practical track record.",
+    ),
+  ];
+
+  /* --- 5. Summary & Spelling / Typo Hygiene (10 max) --- */
+  const hasSummary = parsed.sections.some((s) => s.type === "summary");
+  const grammarAnalysis = analyzeGrammar(text);
+  const spellingIssues = grammarAnalysis.issues.filter(
+    (i) => i.type === "spelling" || i.type === "ocr" || i.type === "repetition",
+  );
+
+  const summaryAndTypoChecks: AtsCheck[] = [
+    check(
+      "summary",
+      "Professional summary relevant to JD & role",
+      hasSummary,
+      hasSummary ? 4 : 2,
+      4,
+      hasSummary
+        ? "Professional summary section present."
+        : "No explicit summary section — adding a 2-3 line summary targeted to the JD enhances recruiter scannability.",
+    ),
+    check(
+      "typos",
+      "Spelling & middle-word typo cleanliness",
+      spellingIssues.length === 0,
+      Math.max(0, 6 - spellingIssues.length * 1.5),
+      6,
+      spellingIssues.length === 0
+        ? "Spelling and typo check clean."
+        : `${spellingIssues.length} spelling/typo issue(s) detected: ${spellingIssues.slice(0, 3).map((e) => e.error).join(", ")}.`,
+    ),
+  ];
 
   const categories: AtsCategory[] = [
-    cat("parse", "ATS Parseability & Contact", parse, 20),
-    cat("structure", "Section Structure", structureChecks, 20),
-    cat("impact", "Impact & Writing Quality", impact, 25),
-    cat("skills", hasCustomJd ? "JD Skills & Competencies" : "Skills & Keyword Coverage", skillChecks, 20),
-    cat("format", "Formatting Hygiene", fmt, 15),
+    cat("parse", "Contact Details & Links", parse, 20),
+    cat("skills", hasCustomJd ? "Skills & JD Matching" : "Core Technical Skills", skillChecks, 30),
+    cat("projects", "Projects Depth (>= 2 Projects)", projectChecks, 25),
+    cat("experience", "Experience with Dates", expChecks, 15),
+    cat("hygiene", "Summary & Spelling Hygiene", summaryAndTypoChecks, 10),
   ];
 
   let score = Math.round(categories.reduce((s, c) => s + c.score, 0));
 
-  /* --- Final JD score blending --- */
-  if (hasCustomJd && jdScore !== null) {
-    score = Math.round(score * 0.6 + jdScore * 0.4);
-    if (jdScore < 35) {
-      blockers.push(`Low JD alignment: only ${jdScore}% of required job description keywords found.`);
-    }
+  /* --- Blocker Caps (Only for genuine showstoppers like missing email or empty document) --- */
+  if (!hasEmail) {
+    score = Math.min(score, 60);
   }
-
-  /* --- Hard Blockers & Structural Overhaul Penalties --- */
-  if (blockers.length > 0) {
-    const penalty = Math.min(30, blockers.length * 10);
-    score = Math.max(20, score - penalty);
-    // Candidates with severe blockers (overwhelmed bullets, keyword stuffing, 45+ word bullet, missing core sections)
-    // CANNOT pass as Tier 1 or high Tier 2. Their score is capped at 64 (Tier 3 Overhaul Required).
-    const isSevere = blockers.length >= 2 || tooLong || !hasEmail || requiredHit < 3 || isKeywordStuffed;
-    if (isSevere) {
-      score = Math.min(64, score);
-    } else {
-      score = Math.min(74, score);
-    }
+  if (words <= 80) {
+    score = Math.min(score, 40);
   }
 
   const roleArc = classifyRoleArc(text);

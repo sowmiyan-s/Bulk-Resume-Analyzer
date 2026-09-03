@@ -50,7 +50,7 @@ export const DEFAULT_SETTINGS: LlmSettings = {
   proxyUrl: "",
   customBaseUrl: "",
   temperature: 0.2,
-  maxTokens: 3500,
+  maxTokens: 2500,
   defaultRole: "Software Engineer (Entry Level)",
   companyName: "the hiring company",
   supabaseUrl: "",
@@ -73,64 +73,76 @@ export class LlmError extends Error {
 /* ------------------------------- prompting ------------------------------- */
 
 const SYSTEM_PROMPT =
-  "You are a Principal Engineering Director and Senior Technical Hiring Manager. " +
-  "You evaluate candidates on REAL ENGINEERING CAPABILITY, PRACTICAL PROJECTS, TECH STACK DEPTH, AND PROBLEM-SOLVING ABILITY. " +
-  "CRITICAL PHILOSOPHY: PRIORITIZE ACTUAL TECHNICAL TALENT OVER SUPERFICIAL ENGLISH GRAMMAR, CASING, OR TEMPLATE FORMATTING. " +
-  "Do NOT penalize a strong developer for minor grammatical quirks, lack of corporate buzzwords, or simple resume layout. " +
-  "If a candidate has built substantial technical projects, full-stack applications, databases, AI/ML pipelines, or APIs, REWARD THEM WITH HIGH SCORES (80-95+). " +
-  "EVALUATION BENCHMARK (100 PTS TOTAL - 100% TALENT FOCUSED): " +
-  "1. Technical Skills Depth & Core Stack (30 pts max): Languages (C++, Java, Python, TypeScript, Go, etc.), modern frameworks (React, Node, Django, FastAPI, Spring, etc.), databases (PostgreSQL, MongoDB, Redis), and developer tools (Docker, Git, Linux, Cloud). " +
-  "2. Project Complexity & Systems Architecture (35 pts max): Depth of projects built, full-stack integration, backend APIs, data flow, complexity, and demonstrable working code. " +
-  "3. Practical Track Record & Internships (20 pts max): Real-world application, internships, practical contributions, open-source code, and alignment with target role/JD. " +
-  "4. Achievements, Verifiable Proof & Extracurriculars (15 pts max): Hackathons, GitHub repositories, live demo links, competitive programming (LeetCode/Codeforces), technical awards, or accreditations. " +
-  "The deterministic ATS score and JD match supplied in the user message are authoritative. Do not recalculate, change, or invent either score; use your output only for evidence-based explanations and improvement guidance. Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
+  "You are a Senior Technical Hiring Manager and Principal Engineering Assessor. " +
+  "PRIMARY MISSION: Determine if the candidate is the BEST FIT for the Job Description (JD) / Target Role. " +
+  "If the candidate is not yet an optimal fit, provide high-impact, actionable, and concrete suggestions on how to elevate their resume to become job-ready for this specific role. " +
+  "MANDATORY EVALUATION PILLARS: " +
+  "1. Skill Matching with JD: Check how well candidate core skills match JD requirements. Identify matched competencies, missing critical skills, and suggested bridge skills. " +
+  "2. Technical Projects: Candidates must have at least 2 well-explained technical projects with architecture, tools used, and demonstrable outcomes. " +
+  "3. Experience & Internships: Must have clear date ranges and meaningful explanations of responsibilities and technical impact. " +
+  "4. Professional Summary: Must be tailored, scannable, and directly relevant to the target role/JD. " +
+  "5. Contact Channels: Machine-readable email, phone number, LinkedIn profile, and verifiable GitHub/portfolio link. " +
+  "6. Grammar & Spelling Hygiene: Catch genuine spelling mistakes and typos without being excessively punitive on overall score. " +
+  "OPTIONAL SECTIONS PHILOSOPHY: " +
+  "Sections like Education, Certifications, Achievements, and Extracurriculars are strictly OPTIONAL based on candidate preference. NEVER penalize a candidate or deduct points if education, certifications, or achievements are absent. Never demand credential IDs or license links for certifications. If certifications are present, suggest how to make them directly relevant to the target JD and project work. " +
+  "CRITICAL RULE ON PROJECTS: NEVER SUGGEST RENAMING CANDIDATE PROJECTS. Keep the candidate's existing project names as they are. You cannot know the full context of their project from a short resume snippet. Only suggest content improvements (such as adding metrics, architecture details, or stack clarification), never alternative project titles. " +
+  "ZERO-HALLUCINATION DISCIPLINE: Anchor all evaluations strictly in the actual text of the resume. Never hallucinate project renames, nonexistent credentials, or fabricated numbers. " +
+  "The deterministic ATS score and JD match in the user prompt are authoritative. Return ONE compact, raw JSON object matching the schema specification without markdown fences or extraneous commentary.";
 
 /** Compact key list for authentic engineering talent analysis without filler. */
 const SCHEMA_SPEC = `Keys (all required, all strings/arrays/objects as typed):
-candidate_name:string (Extract candidate's actual name from resume header or file name)
+candidate_name:string (Extract candidate's actual name from resume header or file name without honorifics like Mr/Ms)
 role:string (target role inferred or specified)
 assumed_role:string (role evaluated against)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
 overall_score:int 0-100 (echo the authoritative real_ats_score from ATS PRE-COMPUTED FACTS; never invent or override it)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
-score_breakdown:[{category:"Technical Skills Depth & Core Stack"|"Project Complexity & Systems Architecture"|"Practical Track Record & Internships"|"Achievements, Verifiable Proof & Code Links"|"Professional Summary & Career Positioning"|"Verified Certifications & Accreditations",score:int,max:int,note:string}] exactly 6 rows (maxes: 30, 35, 20, 15, 0, 0 or equivalent summing to 100)
+score_breakdown:[{category:"Contact Details & Links"|"Skills & JD Matching"|"Projects Depth (>= 2 Projects)"|"Experience with Dates"|"Summary & Spelling Hygiene"|"Verified Certifications & Accreditations",score:int,max:int,note:string}] exactly 6 rows (maxes: 20, 30, 25, 15, 10, 0 or summing to 100)
 jd_match:{score:int 0-100,verdict:string} (echo authoritative jd_keyword_match when supplied; never invent or override it)
-recruiter_first_impression:string (<=35 words: blunt, authentic assessment of candidate's technical skills and project depth)
-hr_verdict:string (<=45 words: clear hiring recommendation based on verified engineering capabilities)
+recruiter_first_impression:string (<=35 words: blunt, authentic assessment of candidate's JD fit and project depth)
+hr_verdict:string (<=45 words: clear hiring recommendation and gap-bridging verdict)
 strengths:[string] max 3 (top concrete technical strengths, e.g. 'Built microservices with FastAPI & Redis', 'Solid full-stack Next.js + PostgreSQL integration')
-critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] Only flag genuine technical dealbreakers (e.g. missing contact email/phone, completely missing projects, or 0% match with required tech stack). DO NOT flag grammar, typos, or layout quirks as critical issues. Return [] if the candidate has a functional technical profile.
+critical_issues:[{severity:"critical"|"major"|"minor",area,problem,evidence,fix}] Flag genuine dealbreakers (missing contact email/phone, fewer than 2 projects, or 0% match with required tech stack). Return [] if the candidate has a functional technical profile.
 grammar_and_ocr_errors:[string] Informational only: genuine misspelled words (e.g. '"algoritm" -> "algorithm"'). Return [] if clean.
 formatting_problems:[string] Informational only: missing contact info or unreadable blocks. Return [] if clean.
 skill_matrix:{matched_skills:[string],missing_skills:[string],recommended_skills:[string] max 5 each} (Verified technical keywords)
 bullet_rewrites:[{original,rewritten,reason}] 2-3 items. Elevate bullet points with concrete technical tools, architecture, and realistic developer metrics.
-tech_improvement_ideas:[string] max 4 (concrete tools/frameworks that would elevate their technical stack depth)
-project_suggestions:[string] max 2 (advanced engineering project ideas to take their skills to production level)
+tech_improvement_ideas:[string] max 4 (concrete tools/frameworks that would elevate their technical stack to match the JD)
+project_suggestions:[string] max 2 (advanced engineering project ideas to make them an immediate fit for the target JD - NEVER suggest renaming existing projects)
 structure:{score:int 0-100,label:string ("Excellent"|"Good"|"Needs work"|"Poor"),notes:[string] max 3}
 data_gaps:[{area,missing,impact}] max 3 (missing GitHub/live demo links, missing stack details)
 relevance:{assumed_role:string, evaluation_basis:string, skills_misaligned:boolean, verdict:string <=35 words}
 section_audits:{summary:{score:int 0-10,audit:string,fix_tip:string},skills:{score:int 0-30,matched_keywords:[string],missing_critical_skills:[string],audit:string,fix_tip:string},projects:{score:int 0-35,architecture_rating:string,live_proof:bool,audit:string,fix_tip:string},internships:{score:int 0-20,jd_relevance_pct:int 0-100,jd_relevance_explanation:string,audit:string,fix_tip:string},certifications:{score:int 0-5,verified_count:int,audit:string,fix_tip:string},achievements:{score:int 0-10,audit:string,fix_tip:string}}
-section_improvements:[{section:string,current_gap:string,actionable_fix:string}] 3-5 concrete technical suggestions
+section_improvements:[{section:string,current_gap:string,actionable_fix:string}] 3-5 concrete suggestions to make the resume job-fit (do NOT suggest renaming projects)
 placement_tips:[string] 3-4 tactical technical interview tips for this candidate`;
 
 const RULES = `Professional Evaluation & Scoring Standards:
-1. TALENT-FIRST SDE EVALUATION (0-100 SCALE):
-   - Score candidates based on REAL CODING, ARCHITECTURAL, AND TECHNICAL MERIT.
-   - High Scores (80-95+): Awarded to candidates with multi-tier projects, solid full-stack/backend/systems apps, databases, modern languages (Python, Java, C++, TypeScript, Go), and practical problem solving. Minor grammar or single-column layout must NEVER lower their score below 80.
-   - Moderate Scores (65-79): Candidate has foundational projects (e.g. CRUD apps, academic assignments) and basic languages, but lacks complex architecture or live deployment.
-   - Low Scores (<65): Candidate has no technical projects, no recognizable programming stack, or non-technical background.
+1. PRIMARY OBJECTIVE - JD FIT & ACTIONABLE ELEVATION:
+   - Your number one goal is to evaluate if the candidate is the best fit for the JD.
+   - If not a strong fit, provide direct, high-value suggestions in tech_improvement_ideas, project_suggestions, and section_improvements to make them job-ready.
 
-2. ABSOLUTE BAN ON GRAMMAR & TEMPLATE PENALTIES:
-   - NEVER reduce overall scores for imperfect English grammar, spelling typos, or simple visual formatting.
-   - We are hiring SOFTWARE ENGINEERS, not English copywriters. Judge their code, stack, problem solving, and architecture.
+2. MANDATORY PILLARS:
+   - Skills matching with JD (matched, missing, and recommended skills).
+   - Projects (require at least 2 well-explained technical projects with tools and architecture).
+   - Experience (dated work/internship records with clear explanations).
+   - Summary (relevant to the target role/JD).
+   - Contact details (Email, Phone, LinkedIn, GitHub / Portfolio).
+   - Spelling mistakes & typos (identified constructively in grammar_and_ocr_errors).
 
-3. JOB DESCRIPTION (JD) RELEVANCE:
-   - When a JD is provided, evaluate how their technical skills and projects overlap with the JD's required technologies and responsibilities.
-   - When no JD is provided, evaluate them fairly based on their chosen engineering domain (Frontend, Backend, Full-Stack, AI/ML, Systems, Data).
+3. ABSOLUTE PROHIBITION ON RENAMING PROJECTS:
+   - NEVER suggest renaming or changing existing project titles.
+   - You cannot know the full context or origin of candidate projects from a brief resume summary.
+   - Only suggest technical content additions (e.g., adding metrics, architecture, or tools), never alternative project names.
 
-4. SCORE INTEGRITY:
-   - ATS PRE-COMPUTED FACTS are deterministic facts from the extracted resume. Treat real_ats_score, category points, blockers, and JD keyword match as authoritative.
-   - Never reward a long skills list unless the resume demonstrates those skills in experience/project bullets. Never call a resume shortlist-ready when the facts show blockers.
-   - Use exact resume evidence for issues and rewrites. Never invent metrics, employers, links, dates, certifications, or project outcomes.`;
+4. OPTIONAL SECTIONS (NO PENALTIES OR CREDENTIAL DEMANDS):
+   - Education, Certifications, and Achievements are strictly optional based on candidate preference.
+   - NEVER penalize or reduce scores if a candidate does not list education, certifications, or achievements.
+   - NEVER demand credential IDs, license numbers, or verification links for certifications.
+   - If certifications or extra projects are present, suggest how to make them directly relevant to the JD.
+
+5. ZERO-HALLUCINATION SCORE INTEGRITY & DISCIPLINE:
+   - ATS PRE-COMPUTED FACTS are deterministic facts from the extracted resume. Treat real_ats_score and JD keyword match as authoritative.
+   - Never invent metrics, employers, links, dates, or project outcomes. Return clean, valid JSON every time.`;
 
 export function buildMessages(input: {
   fileName: string;
