@@ -348,6 +348,22 @@ function getBullets(lines: string[]): string[] {
     .map((l) => l.replace(/^[-•*▪◦‣·–—>]+\s*/, "").trim());
 }
 
+/** A contact header such as "name | email | LinkedIn" is not a table. */
+function hasTableLayout(lines: string[]): boolean {
+  const pipeRows = lines.filter((line) => (line.match(/\|/g) ?? []).length >= 2);
+  if (pipeRows.length < 3) return false;
+  const columnCounts = new Set(pipeRows.map((line) => (line.match(/\|/g) ?? []).length));
+  return columnCounts.size <= 2 || pipeRows.some((line) => /-{2,}/.test(line));
+}
+
+function hasDateRange(text: string): boolean {
+  return (
+    /(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:19|20)\d{2}|present|current)/i.test(text) ||
+    /\b(?:0?[1-9]|1[0-2])\/(?:19|20)\d{2}\s*[-–—]\s*(?:0?[1-9]|1[0-2])\/(?:19|20)\d{2}\b/i.test(text) ||
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(?:19|20)\d{2}\s*[-–—]/i.test(text)
+  );
+}
+
 const QUANT_RE =
   /(\d+(\.\d+)?\s?%|\$\s?\d|₹\s?\d|\b\d{2,}\+?\b|\b\d+(\.\d+)?\s?(x|k|m|bn|hrs?|hours?|days?|weeks?|months?|users?|requests?|records?|ms|sec|seconds?|gb|tb|qps|rps)\b)/i;
 
@@ -528,9 +544,15 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
 
   const quantifiedBullets = bullets.filter((b) => QUANT_RE.test(b)).length;
   const actionVerbBullets = parsed.powerVerbCount + parsed.standardVerbCount;
+  // Proof in experience/projects is meaningful; a keyword in a skills list
+  // alone must not make a shallow resume look senior.
+  const evidenceText = parsed.sections
+    .filter((section) => section.type === "experience" || section.type === "projects")
+    .map((section) => section.rawText)
+    .join("\n");
   const hasProofOfWork =
     /(npm install|pip install|pypi\.org|npmjs\.com|patent|research paper|ijcrt|ieee|springer|published in|hackathon|leetcode|codeforces|kaggle|1st prize|2nd prize|3rd prize)/i.test(
-      text,
+      evidenceText,
     );
   const longestBulletWords = bullets.reduce((m, b) => Math.max(m, b.split(/\s+/).length), 0);
   const readabilityWordsPerBullet = bullets.length
@@ -640,10 +662,10 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     check(
       "dates",
       "Dated experience entries",
-      /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text),
-      /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text) ? 4 : 0,
+      hasDateRange(text),
+      hasDateRange(text) ? 4 : 0,
       4,
-      /(19|20)\d{2}\s*[-–—to]+\s*((19|20)\d{2}|present|current)/i.test(text)
+      hasDateRange(text)
         ? "Clear date ranges detected on experience entries."
         : "Missing explicit date spans (e.g. '2023 - Present' or 'Jun 2022 - May 2024') on experience/education entries.",
     ),
@@ -739,7 +761,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     blockers.push(`Keyword stuffing detected: ${skillsFound.length} technical skills listed, but only ${provenSkills.length} applied in project bullets.`);
   }
 
-  const highBarSignals = containsAny(text, [
+  const highBarSignals = containsAny(evidenceText, [
     "distributed systems", "concurrency", "multithreading", "event-driven", "microservices",
     "kafka", "rabbitmq", "redis", "caching", "database indexing", "sharding", "connection pooling",
     "rate limiting", "jwt", "oauth", "sandboxed", "docker", "kubernetes", "grpc", "websockets",
@@ -752,14 +774,16 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   let matched: string[] = [];
   let missing: string[] = [];
   let jdScore: number | null = null;
+  let bulletMatchedCount = 0;
 
   if (hasCustomJd) {
     kws = jdKeywords(jobDescription!);
     matched = kws.filter((k) => containsAny(text, [k]).length > 0);
     missing = kws.filter((k) => !matched.includes(k));
-    // Accurate JD coverage: base ratio of required keywords matched + project proof bonus
+    // JD coverage is evidence weighted: a keyword in a Skills list is weaker
+    // than the same keyword demonstrated in a project or experience bullet.
     const matchRatio = kws.length > 0 ? (matched.length / kws.length) : 1;
-    const bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
+    bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
     const bulletBonus = Math.min(12, bulletMatchedCount * 2.5);
     jdScore = Math.min(100, Math.max(10, Math.round(matchRatio * 88 + bulletBonus)));
   } else {
@@ -782,16 +806,23 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "jd-skills",
           "Target JD required skills & keywords match",
-          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)),
-          Math.min(10, kws.length ? (matched.length / Math.max(1, Math.min(15, kws.length))) * 10 : 10),
+          matched.length >= Math.min(5, Math.ceil(kws.length * 0.4)) &&
+            (bulletMatchedCount >= 1 || matched.length < 3),
+          Math.min(
+            10,
+            kws.length
+              ? (matched.length / kws.length) * 6 +
+                  (matched.length ? (bulletMatchedCount / matched.length) * 4 : 0)
+              : 10,
+          ),
           10,
           `${matched.length}/${kws.length} JD keywords matched (${matched.slice(0, 8).join(", ")}${matched.length > 8 ? "…" : ""}). Missing: ${missing.slice(0, 5).join(", ") || "none"}.`,
         ),
         check(
           "skill-count",
           "Technical skills applied in project context",
-          provenSkills.length >= 2 || skillsFound.length >= 4,
-          Math.min(5, provenSkills.length * 1.5 + skillsFound.length * 0.4),
+          provenSkills.length >= 2,
+          Math.min(5, provenSkills.length * 1.5 + Math.min(2, skillsFound.length * 0.25)),
           5,
           provenSkills.length > 0
             ? `${provenSkills.length} skills verified in project bullets (${provenSkills.slice(0, 5).join(", ")}).`
@@ -832,7 +863,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
         check(
           "tooling",
           "Cloud / DevOps / testing tooling present",
-          containsAny(text, [
+          containsAny(evidenceText, [
             "aws",
             "azure",
             "gcp",
@@ -849,7 +880,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
           ]).length > 0,
           Math.min(
             6,
-            containsAny(text, [
+            containsAny(evidenceText, [
               "aws",
               "azure",
               "gcp",
@@ -866,7 +897,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
             ]).length * 1.5,
           ),
           6,
-          "Modern engineering tooling signals reliability to screeners.",
+          `${containsAny(evidenceText, ["aws", "azure", "gcp", "docker", "kubernetes", "ci/cd", "jenkins", "github actions", "pytest", "jest", "junit", "terraform", "git"]).length} delivery/testing tools demonstrated in experience or projects.`,
         ),
       ];
 
@@ -877,7 +908,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   if (overwhelmedBullets) {
     blockers.push(`Overwhelmed structure: ${bullets.length} bullets with only ${Math.round(quantRatio * 100)}% quantified outcomes. Uncalibrated text triggers recruiter fatigue.`);
   }
-  const hasTableChars = /\|\s*\S+\s*\|/.test(text);
+  const hasTableChars = hasTableLayout(lines);
   const specialGlyphs = (text.match(/[^\x00-\x7F\u2018\u2019\u201c\u201d\u2013\u2014•₹]/g) ?? [])
     .length;
   const lengthOk = words >= 300 && words <= 900;

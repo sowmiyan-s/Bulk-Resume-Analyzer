@@ -1,0 +1,4 @@
+- [ ] Make deterministic ATS scoring authoritative over model output
+- [ ] Add evidence-integrity gates and fix false layout/date detections
+- [ ] Show score evidence and deterministic mistakes in the candidate report
+- [ ] Validate ranking with strong, weak, and keyword-stuffed resumes
