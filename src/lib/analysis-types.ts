@@ -668,8 +668,12 @@ export function normalizeAnalysis(
   const explicitOverall = pick(o, "overall_score", "overallScore", "score");
   
   // Authentic scoring: preserve the exact score evaluated by the model / section breakdown
-  const overallScore =
-    explicitOverall !== undefined
+  // The deterministic ATS engine is the source of truth. The model supplies
+  // explanations only; accepting its self-reported score is what allowed
+  // shallow keyword-heavy resumes to outrank evidence-backed resumes.
+  const overallScore = ats
+    ? ats.score
+    : explicitOverall !== undefined
       ? clamp(num(explicitOverall))
       : sumBreakdown > 0
         ? clamp(sumBreakdown)
@@ -678,10 +682,10 @@ export function normalizeAnalysis(
           : 0;
 
   const finalJdScore =
-    rawJdScore !== undefined && rawJdScore !== null
-      ? clamp(num(rawJdScore))
-      : ats?.jdScore !== null && ats?.jdScore !== undefined
+    ats?.jdScore !== null && ats?.jdScore !== undefined
         ? ats.jdScore
+        : rawJdScore !== undefined && rawJdScore !== null
+          ? clamp(num(rawJdScore))
         : clamp(Math.round(overallScore * 0.88));
 
   const inferredRole = str(
@@ -973,14 +977,10 @@ export function createRuleBasedAnalysis(
   const role = activeJd ? "Target JD Role" : defaultRole || "Software Engineer (Entry Level)";
   const basis: "role-fit" | "jd-fit" = activeJd ? "jd-fit" : "role-fit";
   const hasHardBlockers = atsReport.blockers.length > 0;
-  // Calibrate rule-based ATS format score: format-only checks without verified AI project architecture reasoning
-  // are scaled appropriately so superficial formatting doesn't outscore verified technical candidates.
-  const rawRuleScore = atsReport.score;
-  const calibratedScore = Math.min(
-    74,
-    Math.round(rawRuleScore * 0.72 + (atsReport.metrics.skillsFound.length >= 8 ? 8 : 4)),
-  );
-  const overallScore = hasHardBlockers ? Math.min(58, calibratedScore) : calibratedScore;
+  // The deterministic score is the report's single source of truth. Do not
+  // apply another opaque multiplier here: it makes category evidence disagree
+  // with the score used for ranking.
+  const overallScore = atsReport.score;
   const readinessTier = toTier(undefined, overallScore, hasHardBlockers);
 
   const finalBreakdown: ScoreRow[] = atsReport.categories.map((c) => ({
