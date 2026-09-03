@@ -83,7 +83,7 @@ const SYSTEM_PROMPT =
   "2. Project Complexity & Systems Architecture (35 pts max): Depth of projects built, full-stack integration, backend APIs, data flow, complexity, and demonstrable working code. " +
   "3. Practical Track Record & Internships (20 pts max): Real-world application, internships, practical contributions, open-source code, and alignment with target role/JD. " +
   "4. Achievements, Verifiable Proof & Extracurriculars (15 pts max): Hackathons, GitHub repositories, live demo links, competitive programming (LeetCode/Codeforces), technical awards, or accreditations. " +
-  "Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
+  "The deterministic ATS score and JD match supplied in the user message are authoritative. Do not recalculate, change, or invent either score; use your output only for evidence-based explanations and improvement guidance. Reply with one compact, raw JSON object only: no markdown formatting, no commentary.";
 
 /** Compact key list for authentic engineering talent analysis without filler. */
 const SCHEMA_SPEC = `Keys (all required, all strings/arrays/objects as typed):
@@ -91,10 +91,10 @@ candidate_name:string (Extract candidate's actual name from resume header or fil
 role:string (target role inferred or specified)
 assumed_role:string (role evaluated against)
 evaluation_basis:string ("role-fit" when judged against a default role, "jd-fit" when a JD was supplied)
-overall_score:int 0-100 (Real talent score: Skills 30 + Projects 35 + Experience 20 + Proof 15 = 100 max)
+overall_score:int 0-100 (echo the authoritative real_ats_score from ATS PRE-COMPUTED FACTS; never invent or override it)
 readiness_tier:"Tier 1: Shortlist Ready"|"Tier 2: Needs Minor Polish"|"Tier 3: Overhaul Required"
 score_breakdown:[{category:"Technical Skills Depth & Core Stack"|"Project Complexity & Systems Architecture"|"Practical Track Record & Internships"|"Achievements, Verifiable Proof & Code Links"|"Professional Summary & Career Positioning"|"Verified Certifications & Accreditations",score:int,max:int,note:string}] exactly 6 rows (maxes: 30, 35, 20, 15, 0, 0 or equivalent summing to 100)
-jd_match:{score:int 0-100,verdict:string} (required: percentage alignment of technical competencies to JD requirements)
+jd_match:{score:int 0-100,verdict:string} (echo authoritative jd_keyword_match when supplied; never invent or override it)
 recruiter_first_impression:string (<=35 words: blunt, authentic assessment of candidate's technical skills and project depth)
 hr_verdict:string (<=45 words: clear hiring recommendation based on verified engineering capabilities)
 strengths:[string] max 3 (top concrete technical strengths, e.g. 'Built microservices with FastAPI & Redis', 'Solid full-stack Next.js + PostgreSQL integration')
@@ -125,7 +125,12 @@ const RULES = `Professional Evaluation & Scoring Standards:
 
 3. JOB DESCRIPTION (JD) RELEVANCE:
    - When a JD is provided, evaluate how their technical skills and projects overlap with the JD's required technologies and responsibilities.
-   - When no JD is provided, evaluate them fairly based on their chosen engineering domain (Frontend, Backend, Full-Stack, AI/ML, Systems, Data).`;
+   - When no JD is provided, evaluate them fairly based on their chosen engineering domain (Frontend, Backend, Full-Stack, AI/ML, Systems, Data).
+
+4. SCORE INTEGRITY:
+   - ATS PRE-COMPUTED FACTS are deterministic facts from the extracted resume. Treat real_ats_score, category points, blockers, and JD keyword match as authoritative.
+   - Never reward a long skills list unless the resume demonstrates those skills in experience/project bullets. Never call a resume shortlist-ready when the facts show blockers.
+   - Use exact resume evidence for issues and rewrites. Never invent metrics, employers, links, dates, certifications, or project outcomes.`;
 
 export function buildMessages(input: {
   fileName: string;
