@@ -668,8 +668,12 @@ export function normalizeAnalysis(
   const explicitOverall = pick(o, "overall_score", "overallScore", "score");
   
   // Authentic scoring: preserve the exact score evaluated by the model / section breakdown
-  const overallScore =
-    explicitOverall !== undefined
+  // The deterministic ATS engine is the source of truth. The model supplies
+  // explanations only; accepting its self-reported score is what allowed
+  // shallow keyword-heavy resumes to outrank evidence-backed resumes.
+  const overallScore = ats
+    ? ats.score
+    : explicitOverall !== undefined
       ? clamp(num(explicitOverall))
       : sumBreakdown > 0
         ? clamp(sumBreakdown)
@@ -678,10 +682,10 @@ export function normalizeAnalysis(
           : 0;
 
   const finalJdScore =
-    rawJdScore !== undefined && rawJdScore !== null
-      ? clamp(num(rawJdScore))
-      : ats?.jdScore !== null && ats?.jdScore !== undefined
+    ats?.jdScore !== null && ats?.jdScore !== undefined
         ? ats.jdScore
+        : rawJdScore !== undefined && rawJdScore !== null
+          ? clamp(num(rawJdScore))
         : clamp(Math.round(overallScore * 0.88));
 
   const inferredRole = str(
