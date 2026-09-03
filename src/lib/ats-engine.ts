@@ -571,7 +571,6 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   }
 
   const skillsFound = containsAny(text, SKILL_TAXONOMY);
-  const provenSkillCount = parsed.provenSkills.length;
   const blockers: string[] = [];
 
   /* --- 1. Parseability & contact (20) --- */
@@ -775,6 +774,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
   let matched: string[] = [];
   let missing: string[] = [];
   let jdScore: number | null = null;
+  let bulletMatchedCount = 0;
 
   if (hasCustomJd) {
     kws = jdKeywords(jobDescription!);
@@ -783,7 +783,7 @@ export function runAtsEngine(resumeText: string, jobDescription?: string): AtsRe
     // JD coverage is evidence weighted: a keyword in a Skills list is weaker
     // than the same keyword demonstrated in a project or experience bullet.
     const matchRatio = kws.length > 0 ? (matched.length / kws.length) : 1;
-    const bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
+    bulletMatchedCount = matched.filter((m) => parsed.provenSkills.includes(m)).length;
     const bulletBonus = Math.min(12, bulletMatchedCount * 2.5);
     jdScore = Math.min(100, Math.max(10, Math.round(matchRatio * 88 + bulletBonus)));
   } else {
