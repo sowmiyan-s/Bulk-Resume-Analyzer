@@ -95,6 +95,38 @@ type QueueItem = {
   durationMs: number | null;
 };
 
+/** Convert file bytes to base64 Data URL for permanent MongoDB document storage and PDF preview */
+function fileBytesToDataUrl(file?: ExtractedFile): { dataUrl: string; fileType: string; fileSize: number } | null {
+  if (!file || !file.bytes || file.bytes.length === 0) return null;
+  // If file exceeds 12MB, skip storing raw binary to stay safely within MongoDB document limits
+  if (file.bytes.length > 12 * 1024 * 1024) return null;
+
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  let mimeType = "application/pdf";
+  if (file.kind === "pdf" || ext === "pdf") mimeType = "application/pdf";
+  else if (file.kind === "docx" || ext === "docx") mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  else if (ext === "doc") mimeType = "application/msword";
+  else if (file.kind === "image" || ["png", "jpg", "jpeg", "webp"].includes(ext)) {
+    mimeType = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+  } else if (file.kind === "text" || ext === "txt") {
+    mimeType = "text/plain";
+  }
+
+  let binary = "";
+  const len = file.bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = file.bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  const base64 = btoa(binary);
+  return {
+    dataUrl: `data:${mimeType};base64,${base64}`,
+    fileType: mimeType,
+    fileSize: file.bytes.length,
+  };
+}
+
 export type SystemInfo = {
   hasServerNvidiaKey?: boolean;
   hasServerGroqKey?: boolean;
@@ -636,12 +668,16 @@ function Index() {
             durationMs: Date.now() - (started.get(id) ?? Date.now()),
           });
           const item = itemsRef.current.find((i) => i.id === id);
+          const filePayload = fileBytesToDataUrl(item?.file);
           void saveAnalysis({
             id,
             fileName: item?.file.name ?? id,
             analysis,
             cleanText: item?.cleanText,
             rawText: item?.rawText,
+            fileData: filePayload?.dataUrl,
+            fileType: filePayload?.fileType,
+            fileSize: filePayload?.fileSize,
           }).catch(() => {});
         },
         onError: (id, message, willRetry, retryInSec) => {
@@ -804,12 +840,16 @@ function Index() {
               manualScore: p.manualScore,
               officerNotes: p.officerNotes,
             };
+            const filePayload = fileBytesToDataUrl(i.file);
             void saveAnalysis({
               id,
               fileName: i.file.name,
               analysis: updatedAnalysis,
               cleanText: p.cleanText,
               rawText: i.rawText,
+              fileData: filePayload?.dataUrl,
+              fileType: filePayload?.fileType,
+              fileSize: filePayload?.fileSize,
             }).catch(() => {});
             return {
               ...i,
@@ -855,12 +895,16 @@ function Index() {
               message: "",
               analysis: merged,
             });
+            const filePayload = fileBytesToDataUrl(item?.file);
             void saveAnalysis({
               id: rid,
               fileName: item?.file.name ?? rid,
               analysis: merged,
               cleanText: item?.cleanText,
               rawText: item?.rawText,
+              fileData: filePayload?.dataUrl,
+              fileType: filePayload?.fileType,
+              fileSize: filePayload?.fileSize,
             }).catch(() => {});
             toast.success("Re-analyzed successfully with updated evaluation score.");
           },
@@ -995,12 +1039,16 @@ function Index() {
               analysis: merged,
               durationMs: Date.now() - (started.get(id) ?? Date.now()),
             });
+            const filePayload = fileBytesToDataUrl(item?.file);
             void saveAnalysis({
               id,
               fileName: item?.file.name ?? id,
               analysis: merged,
               cleanText: item?.cleanText,
               rawText: item?.rawText,
+              fileData: filePayload?.dataUrl,
+              fileType: filePayload?.fileType,
+              fileSize: filePayload?.fileSize,
             }).catch(() => {});
           },
           onError: (id, message, willRetry, retryInSec) => {

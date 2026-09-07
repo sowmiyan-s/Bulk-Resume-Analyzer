@@ -8,12 +8,16 @@ import {
   Cpu,
   Database,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   Filter,
   KeyRound,
   Layers,
   Lock,
+  Maximize2,
+  Minimize2,
   RefreshCw,
   RotateCcw,
   Search,
@@ -28,6 +32,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { getResumeFile } from "@/lib/storage";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,9 +138,93 @@ function AdminPage() {
   const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "score-desc" | "score-asc" | "name">("date-desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedRecord, setSelectedRecord] = useState<StoredMongoAnalysis | null>(null);
-  const [detailTab, setDetailTab] = useState<"overview" | "clean_text" | "raw_text" | "json">("overview");
+  const [detailTab, setDetailTab] = useState<"overview" | "pdf_preview" | "clean_text" | "raw_text" | "json">("overview");
   const [copiedText, setCopiedText] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfData, setPdfData] = useState<{
+    fileData?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    error?: string;
+  } | null>(null);
+  const [pdfFullscreen, setPdfFullscreen] = useState(false);
+
+  // Load PDF when selected candidate changes or preview tab opens
+  useEffect(() => {
+    if (!selectedRecord) {
+      setPdfData(null);
+      setPdfFullscreen(false);
+      return;
+    }
+
+    if (selectedRecord.resume_file_url) {
+      setPdfData({
+        fileData: selectedRecord.resume_file_url,
+        fileName: selectedRecord.file_name,
+        fileType: selectedRecord.resume_file_type || "application/pdf",
+        fileSize: selectedRecord.resume_file_size,
+      });
+      return;
+    }
+
+    if (detailTab === "pdf_preview" || selectedRecord.has_resume_file) {
+      let isMounted = true;
+      setPdfLoading(true);
+      void getResumeFile(selectedRecord.id)
+        .then((res) => {
+          if (!isMounted) return;
+          if (res.success && res.fileData) {
+            setPdfData({
+              fileData: res.fileData,
+              fileName: res.fileName || selectedRecord.file_name,
+              fileType: res.fileType || "application/pdf",
+              fileSize: res.fileSize,
+            });
+          } else {
+            setPdfData({
+              error: res.error || "Resume document not archived for this candidate.",
+            });
+          }
+        })
+        .finally(() => {
+          if (isMounted) setPdfLoading(false);
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [selectedRecord, detailTab]);
+
+  const downloadResume = (fileData: string, fileName: string) => {
+    const a = document.createElement("a");
+    a.href = fileData;
+    a.download = fileName || "resume.pdf";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success(`Downloaded "${fileName}"`);
+  };
+
+  const openResumeInNewTab = (fileData: string) => {
+    try {
+      const parts = fileData.split(",");
+      const mime = parts[0]?.match(/:(.*?);/)?.[1] || "application/pdf";
+      const bstr = atob(parts[1] || "");
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const blob = new Blob([u8arr], { type: mime });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch {
+      window.open(fileData, "_blank");
+    }
+  };
 
   const loadData = useCallback(async (pass: string) => {
     try {
@@ -1616,12 +1705,32 @@ function AdminPage() {
 
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {/* Preview Resume PDF Button */}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 relative"
+                              onClick={() => {
+                                setSelectedRecord(item);
+                                setDetailTab("pdf_preview");
+                              }}
+                              title="Preview candidate original resume PDF"
+                            >
+                              <FileText className="size-3.5" />
+                              {item.has_resume_file && (
+                                <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary animate-pulse" />
+                              )}
+                            </Button>
+
                             {/* Inspect Full Details Button */}
                             <Button
                               size="icon"
                               variant="ghost"
                               className="size-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-                              onClick={() => setSelectedRecord(item)}
+                              onClick={() => {
+                                setSelectedRecord(item);
+                                setDetailTab("overview");
+                              }}
                               title="Inspect full candidate assessment details"
                             >
                               <Eye className="size-3.5" />
@@ -1677,7 +1786,7 @@ function AdminPage() {
 
         {/* Candidate Detail Inspection Dialog */}
         <Dialog open={Boolean(selectedRecord)} onOpenChange={(open) => !open && setSelectedRecord(null)}>
-          <DialogContent className="max-w-3xl max-h-[88vh] flex flex-col p-0 overflow-hidden rounded-2xl">
+          <DialogContent className={`${detailTab === "pdf_preview" && pdfFullscreen ? "max-w-6xl" : detailTab === "pdf_preview" ? "max-w-4xl" : "max-w-3xl"} max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-2xl transition-all duration-200`}>
             {selectedRecord && (
               <>
                 <DialogHeader className="px-6 pt-6 pb-4 border-b border-border bg-secondary/20">
@@ -1735,6 +1844,13 @@ function AdminPage() {
                       <TabsList className="h-8 bg-secondary/60">
                         <TabsTrigger value="overview" className="text-xs px-3">
                           Overview &amp; Analysis
+                        </TabsTrigger>
+                        <TabsTrigger value="pdf_preview" className="text-xs px-3 flex items-center gap-1.5">
+                          <FileText className="size-3" />
+                          <span>Resume PDF</span>
+                          {selectedRecord.has_resume_file && (
+                            <span className="size-1.5 rounded-full bg-primary" />
+                          )}
                         </TabsTrigger>
                         <TabsTrigger value="clean_text" className="text-xs px-3">
                           Extracted Clean Text
@@ -1911,6 +2027,154 @@ function AdminPage() {
                                 </span>
                               </div>
                             ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {detailTab === "pdf_preview" && (
+                    <div className="space-y-3">
+                      {/* Document Toolbar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl border border-border bg-secondary/30">
+                        <div className="flex items-center gap-2">
+                          <FileText className="size-4 text-primary" />
+                          <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[280px]">
+                            {pdfData?.fileName || selectedRecord.file_name}
+                          </span>
+                          {pdfData?.fileSize ? (
+                            <Badge variant="secondary" className="text-[10px] font-mono">
+                              {Math.round(pdfData.fileSize / 1024)} KB
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {pdfData?.fileData && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => openResumeInNewTab(pdfData.fileData!)}
+                                title="Open document in a new browser tab"
+                              >
+                                <ExternalLink className="size-3" />
+                                <span>New Tab</span>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1"
+                                onClick={() =>
+                                  downloadResume(
+                                    pdfData.fileData!,
+                                    pdfData.fileName || selectedRecord.file_name,
+                                  )
+                                }
+                                title="Download original document file"
+                              >
+                                <Download className="size-3" />
+                                <span>Download</span>
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs gap-1"
+                            onClick={() => setPdfFullscreen((prev) => !prev)}
+                            title={pdfFullscreen ? "Standard size" : "Expand full width"}
+                          >
+                            {pdfFullscreen ? (
+                              <Minimize2 className="size-3" />
+                            ) : (
+                              <Maximize2 className="size-3" />
+                            )}
+                            <span>{pdfFullscreen ? "Standard" : "Expand"}</span>
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* PDF Viewer Canvas */}
+                      {pdfLoading ? (
+                        <div className="flex flex-col items-center justify-center py-24 space-y-3 rounded-xl border border-border bg-secondary/10">
+                          <RefreshCw className="size-8 text-primary animate-spin" />
+                          <div className="text-xs font-medium text-foreground">
+                            Retrieving original resume document from MongoDB Atlas...
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            Streaming binary data into browser viewer
+                          </div>
+                        </div>
+                      ) : pdfData?.fileData ? (
+                        pdfData.fileType?.includes("pdf") || selectedRecord.file_name.toLowerCase().endsWith(".pdf") ? (
+                          <div
+                            className={`relative w-full rounded-xl border border-border bg-muted/40 overflow-hidden shadow-inner transition-all ${
+                              pdfFullscreen ? "h-[74vh]" : "h-[58vh]"
+                            }`}
+                          >
+                            <iframe
+                              src={`${pdfData.fileData}#toolbar=1&navpanes=0`}
+                              title={`Resume Preview - ${selectedRecord.candidate_name}`}
+                              className="w-full h-full border-0 rounded-xl bg-white"
+                            />
+                          </div>
+                        ) : pdfData.fileType?.startsWith("image/") ? (
+                          <div className="flex items-center justify-center p-4 rounded-xl border border-border bg-secondary/10 max-h-[60vh] overflow-auto">
+                            <img
+                              src={pdfData.fileData}
+                              alt={`Resume - ${selectedRecord.candidate_name}`}
+                              className="max-h-[56vh] rounded-lg shadow-md object-contain"
+                            />
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-border bg-secondary/20 p-8 text-center space-y-3">
+                            <FileText className="size-12 mx-auto text-primary/80" />
+                            <h4 className="font-semibold text-foreground text-sm">
+                              {pdfData.fileName || selectedRecord.file_name}
+                            </h4>
+                            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                              Word documents (.docx) cannot be previewed natively in an iframe. You can download the original file or inspect the extracted text below.
+                            </p>
+                            <div className="flex items-center justify-center gap-2 pt-2">
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  downloadResume(
+                                    pdfData.fileData!,
+                                    pdfData.fileName || selectedRecord.file_name,
+                                  )
+                                }
+                              >
+                                <Download className="size-3 mr-1.5" /> Download Original Document
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setDetailTab("clean_text")}
+                              >
+                                View Extracted Text
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-border bg-secondary/10 p-8 text-center space-y-3">
+                          <FileText className="size-10 mx-auto text-muted-foreground/60" />
+                          <h4 className="font-semibold text-foreground text-sm">No Resume PDF Document Attached</h4>
+                          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                            {pdfData?.error ||
+                              "This candidate was screened prior to binary resume archiving or uploaded without a supported raw document payload. The full parsed text is still accessible."}
+                          </p>
+                          <div className="pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setDetailTab("clean_text")}
+                            >
+                              Switch to Extracted Clean Text
+                            </Button>
                           </div>
                         </div>
                       )}

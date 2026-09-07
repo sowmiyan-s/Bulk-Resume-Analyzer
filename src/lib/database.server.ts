@@ -26,6 +26,10 @@ export interface StoredMongoAnalysis {
   clean_text?: string;
   raw_text?: string;
   analysis: Analysis;
+  has_resume_file?: boolean;
+  resume_file_url?: string;
+  resume_file_type?: string;
+  resume_file_size?: number;
   is_deleted?: boolean;
   deleted_at?: string | null;
   deleted_from?: string;
@@ -128,6 +132,9 @@ export async function saveAnalysisMongo(data: {
   analysis: Analysis;
   cleanText?: string | undefined;
   rawText?: string | undefined;
+  fileData?: string | undefined;
+  fileType?: string | undefined;
+  fileSize?: number | undefined;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     const db = await getDb();
@@ -144,7 +151,7 @@ export async function saveAnalysisMongo(data: {
 
     const now = new Date().toISOString();
     const fileName = (data.fileName || "unknown.pdf").trim();
-    const updatePayload = {
+    const updatePayload: Record<string, any> = {
       file_name: fileName,
       candidate_name: data.analysis.candidateName || "Unnamed candidate",
       role: data.analysis.role || "—",
@@ -160,6 +167,13 @@ export async function saveAnalysisMongo(data: {
       is_deleted: false,
       deleted_at: null,
     };
+
+    if (data.fileData) {
+      updatePayload.resume_file_url = data.fileData;
+      updatePayload.resume_file_type = data.fileType || "application/pdf";
+      updatePayload.resume_file_size = data.fileSize || (typeof data.fileData === "string" ? Math.round((data.fileData.length * 3) / 4) : 0);
+      updatePayload.has_resume_file = true;
+    }
 
     // Match by file_name first (case-insensitive) or id to prevent duplicate entries for the same resume
     const matchFilter = fileName
@@ -239,6 +253,9 @@ export async function loadAnalysesMongo(options?: {
         updated_at: d.updated_at || d.created_at || new Date().toISOString(),
         clean_text: d.clean_text || "",
         raw_text: d.raw_text || "",
+        has_resume_file: Boolean(d.resume_file_url || d.has_resume_file),
+        resume_file_type: d.resume_file_type || undefined,
+        resume_file_size: d.resume_file_size || undefined,
         analysis: d.analysis,
         is_deleted: isDel,
         deleted_at: d.deleted_at || null,
@@ -966,6 +983,52 @@ export async function testApiKey(data: {
 
 /* ------------------------------- TanStack Server Function RPC Wrappers ------------------------------- */
 
+/** Fetch original resume file binary/Data URL by candidate ID */
+export async function getResumeFileMongo(data: { id: string }): Promise<{
+  success: boolean;
+  fileData?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  error?: string;
+}> {
+  try {
+    const db = await getDb();
+    const col = db.collection<StoredMongoAnalysis>("analyses");
+    const doc = await col.findOne(
+      { id: data.id },
+      { projection: { resume_file_url: 1, file_name: 1, resume_file_type: 1, resume_file_size: 1 } },
+    );
+    if (!doc || !doc.resume_file_url) {
+      // Fallback lookup by file_name
+      const docByName = await col.findOne(
+        { file_name: data.id },
+        { projection: { resume_file_url: 1, file_name: 1, resume_file_type: 1, resume_file_size: 1 } },
+      );
+      if (docByName && docByName.resume_file_url) {
+        return {
+          success: true,
+          fileData: docByName.resume_file_url,
+          fileName: docByName.file_name,
+          fileType: docByName.resume_file_type || "application/pdf",
+          fileSize: docByName.resume_file_size,
+        };
+      }
+      return { success: false, error: "Resume document is not archived for this candidate." };
+    }
+    return {
+      success: true,
+      fileData: doc.resume_file_url,
+      fileName: doc.file_name,
+      fileType: doc.resume_file_type || "application/pdf",
+      fileSize: doc.resume_file_size,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
 export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
   .validator(
     (data: {
@@ -974,9 +1037,16 @@ export const saveAnalysisMongoFn = createServerFn({ method: "POST" })
       analysis: Analysis;
       cleanText?: string | undefined;
       rawText?: string | undefined;
+      fileData?: string | undefined;
+      fileType?: string | undefined;
+      fileSize?: number | undefined;
     }) => data,
   )
   .handler(async ({ data }) => saveAnalysisMongo(data));
+
+export const getResumeFileMongoFn = createServerFn({ method: "POST" })
+  .validator((data: { id: string }) => data)
+  .handler(async ({ data }) => getResumeFileMongo(data));
 
 export const loadAnalysesMongoFn = createServerFn({ method: "POST" })
   .validator((data?: { includeDeleted?: boolean }) => data)

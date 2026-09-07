@@ -41,6 +41,10 @@ export type StoredAnalysis = {
   updated_at?: string;
   clean_text?: string;
   raw_text?: string;
+  has_resume_file?: boolean;
+  resume_file_url?: string;
+  resume_file_type?: string;
+  resume_file_size?: number;
   analysis: Analysis | null;
 };
 
@@ -64,13 +68,20 @@ function readLocal(): StoredAnalysis[] {
 function writeLocal(rows: StoredAnalysis[]) {
   memoryCache = rows;
   if (typeof window === "undefined") return;
+  // Strip large binary data URLs before writing to localStorage to protect the 5MB browser quota
+  const sanitized = rows.map((r) => {
+    if (!r.resume_file_url) return r;
+    const { resume_file_url: _stripped, ...safe } = r;
+    return { ...safe, has_resume_file: true };
+  });
+
   try {
     // 1. First attempt: persist full records with complete text (modern browser quota is 5-10MB)
-    window.localStorage.setItem(LS_KEY, JSON.stringify(rows.slice(-100)));
+    window.localStorage.setItem(LS_KEY, JSON.stringify(sanitized.slice(-100)));
   } catch {
     try {
       // 2. Fallback on quota limit: keep full clean_text for last 50, compact older raw_text
-      const semiCompact = rows.slice(-60).map((r, idx) => ({
+      const semiCompact = sanitized.slice(-60).map((r, idx) => ({
         ...r,
         raw_text: idx >= 30 ? (r.raw_text ? r.raw_text.slice(0, 2000) : "") : "",
         clean_text: r.clean_text || "",
@@ -79,7 +90,7 @@ function writeLocal(rows: StoredAnalysis[]) {
     } catch {
       try {
         // 3. High-density fallback: keep clean_text only
-        const compact = rows.slice(-40).map((r) => ({
+        const compact = sanitized.slice(-40).map((r) => ({
           ...r,
           raw_text: "",
           clean_text: r.clean_text || "",
@@ -104,6 +115,9 @@ export async function saveAnalysis(input: {
   analysis: Analysis;
   cleanText?: string | undefined;
   rawText?: string | undefined;
+  fileData?: string | undefined;
+  fileType?: string | undefined;
+  fileSize?: number | undefined;
 }): Promise<StoredAnalysis> {
   /* ---- realtime, per-result persistence ---- */
 
@@ -118,9 +132,6 @@ export async function saveAnalysis(input: {
   writeLocal(next);
 
   // 2. Persist to MongoDB Atlas cloud database via server function.
-  //    saveAnalysisMongoFn is an upsert, so calling it per-result (not in a
-  //    single end-of-batch dump) streams each candidate into the cloud the
-  //    instant it finishes.
   try {
     const { saveAnalysisMongoFn } = await dbFns();
     const res = await saveAnalysisMongoFn({
@@ -130,6 +141,9 @@ export async function saveAnalysis(input: {
         analysis: input.analysis,
         cleanText: input.cleanText,
         rawText: input.rawText,
+        fileData: input.fileData,
+        fileType: input.fileType,
+        fileSize: input.fileSize,
       },
     });
     if (!res.success) {
@@ -149,6 +163,9 @@ function toRow(
     analysis: Analysis;
     cleanText?: string | undefined;
     rawText?: string | undefined;
+    fileData?: string | undefined;
+    fileType?: string | undefined;
+    fileSize?: number | undefined;
   },
   status: StoredAnalysis["status"],
 ): StoredAnalysis {
@@ -167,6 +184,10 @@ function toRow(
     updated_at: new Date().toISOString(),
     clean_text: input.cleanText || "",
     raw_text: input.rawText || "",
+    has_resume_file: Boolean(input.fileData),
+    resume_file_url: input.fileData,
+    resume_file_type: input.fileType,
+    resume_file_size: input.fileSize,
     analysis: input.analysis,
   };
 }
@@ -315,3 +336,62 @@ export async function clearAnalyses(): Promise<void> {
     console.warn("[storage] MongoDB clear failed:", err);
   }
 }
+
+const resumeFileCache = new Map<string, { fileData: string; fileName: string; fileType: string; fileSize?: number }>();
+
+/**
+ * Fetch the original uploaded resume document (PDF, DOCX, image) Data URL by candidate ID.
+ * Uses an in-memory client cache to prevent repeated server transfers.
+ */
+export async function getResumeFile(id: string): Promise<{
+  success: boolean;
+  fileData?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  error?: string;
+}> {
+  if (!id) return { success: false, error: "Candidate ID is required." };
+
+  if (resumeFileCache.has(id)) {
+    return { success: true, ...resumeFileCache.get(id)! };
+  }
+
+  // Check in memoryCache if available
+  if (memoryCache) {
+    const found = memoryCache.find((m) => m.id === id || m.file_name === id);
+    if (found?.resume_file_url) {
+      const entry = {
+        fileData: found.resume_file_url,
+        fileName: found.file_name,
+        fileType: found.resume_file_type || "application/pdf",
+        fileSize: found.resume_file_size,
+      };
+      resumeFileCache.set(id, entry);
+      return { success: true, ...entry };
+    }
+  }
+
+  try {
+    const { getResumeFileMongoFn } = await dbFns();
+    const res = await getResumeFileMongoFn({ data: { id } });
+    if (res && res.success && res.fileData) {
+      const entry = {
+        fileData: res.fileData,
+        fileName: res.fileName || "candidate.pdf",
+        fileType: res.fileType || "application/pdf",
+        fileSize: res.fileSize,
+      };
+      resumeFileCache.set(id, entry);
+      return { success: true, ...entry };
+    }
+    return {
+      success: false,
+      error: res?.error || "Resume document is not archived for this candidate.",
+    };
+  } catch (err) {
+    console.warn("[storage] Failed to fetch resume document:", err);
+    return { success: false, error: "Failed to connect to database to retrieve resume document." };
+  }
+}
+

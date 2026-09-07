@@ -86,11 +86,14 @@ describe("Deterministic Engines Unit Tests", () => {
         score_breakdown: "not an array",
       };
       const ats = runAtsEngine("Test resume text");
-      const normalized = normalizeAnalysis(malformedPayload, ats, "Test resume text");
+      const normalized = normalizeAnalysis(malformedPayload, null, "Test resume text");
 
       assert.equal(normalized.candidateName, "Test Candidate");
       assert.equal(normalized.overallScore, 85);
       assert.ok(Array.isArray(normalized.scoreBreakdown));
+
+      const normalizedWithAts = normalizeAnalysis(malformedPayload, ats, "Test resume text");
+      assert.equal(normalizedWithAts.overallScore, ats.score);
     });
   });
 });
