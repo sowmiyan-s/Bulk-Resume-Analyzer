@@ -1,6 +1,6 @@
-# 🎯 Resume Radiance — Bulk AI Resume Screener & Talent Ranking Platform
+# 🎯 Bulk Resume Analyzer — Enterprise AI Resume Screener & Talent Ranking Platform
 
-**Resume Radiance** is an enterprise-grade, high-throughput AI resume screening and applicant tracking platform designed for university placement cells, recruitment teams, and hiring managers. It extracts, audits, scores, and ranks batches of resumes (PDF, DOCX, ZIP) against custom Job Descriptions (JDs) or calibrated **Global SDE Benchmarks** with zero-downtime multi-cloud rate-limit failovers.
+**Bulk Resume Analyzer** (formerly *Resume Radiance*) is an enterprise-grade, high-throughput AI resume screening and applicant tracking platform designed for university placement cells, recruitment teams, and hiring managers. It extracts, audits, scores, and ranks batches of resumes (PDF, DOCX, ZIP) against custom Job Descriptions (JDs) or calibrated **Global SDE Benchmarks** with zero-downtime multi-cloud rate-limit failovers.
 
 ---
 
@@ -14,16 +14,26 @@
   4. **Experience with Dates** (15 pts): Structured internship/work history with clear date ranges.
   5. **Summary & Typo Hygiene** (10 pts): Tailored career summary and spelling cleanliness.
 - 🎯 **Optional Sections Philosophy**: Sections like `Education`, `Certifications`, and `Achievements` are strictly optional. Resumes are **never penalized** for omitting them.
-- 🛡️ **Zero-Downtime 2-Tiered Failover**:
-  - **Intra-Provider Sibling Cascade**: If Groq's 70B model hits a rate limit during 50-resume parallel screening, the proxy instantly shifts to `llama-3.1-8b-instant` or `mixtral-8x7b`.
-  - **Cross-Provider Hot-Standby Vault**: Automatically cascades across providers in your vault (`Groq` $\rightarrow$ `Cerebras` $\rightarrow$ `Qwen` $\rightarrow$ `Gemini` $\rightarrow$ `OpenRouter` $\rightarrow$ `NVIDIA`).
+- 🛡️ **Zero-Downtime Multi-Provider Failover**:
+  - **Intra-Provider Sibling Cascade**: If Groq's 70B model hits a rate limit during 50-resume parallel screening, the proxy instantly shifts to sibling models like `llama-3.1-8b-instant`.
+  - **Cross-Provider Hot-Standby Vault**: Automatically cascades across providers configured in your vault (`Groq` $\rightarrow$ `Cerebras` $\rightarrow$ `Qwen` $\rightarrow$ `Gemini` $\rightarrow$ `OpenRouter` $\rightarrow$ `NVIDIA`).
   - **Deterministic Safety Net**: High-precision ATS engine finishes the assessment under any API outage so batches never freeze.
-- 🏆 **Interactive Candidate Leaderboard**: Sort, filter by readiness tier (`Tier 1: Shortlist Ready`, `Tier 2: Needs Minor Polish`, `Tier 3: Overhaul Required`), export to CSV or Markdown, and inspect full candidate dossiers in real time.
+- 🏆 **Interactive Candidate Leaderboard & Master Table**:
+  - Sort and filter by readiness tier (`Tier 1: Shortlist Ready`, `Tier 2: Needs Minor Polish`, `Tier 3: Overhaul Required`).
+  - Search across candidate names, extracted skills, and scores.
+  - Quick action status toggles (Shortlisted, Under Review, Rejected).
+  - One-click personalized candidate email draft generator.
+  - Export to **CSV**, **Markdown**, and **Executive PDF Scorecards**.
+- ✏️ **Candidate Rectification Drawer (`RectifyDrawer`)**:
+  - Manually audit and rectify parsed candidate fields (skills, projects, experience).
+  - Recalculate deterministic and LLM ATS scores on the fly.
 - 🔐 **Admin Management Hub (`/admin`)**:
   - Encrypted MongoDB Atlas key vault with live connection testing.
   - Global Default Role & Default Job Description configuration.
-  - Complete resume audit history with soft-delete tracking, permanent purge, and one-click restoration to the Home dashboard.
-- 📄 **Executive PDF Scorecard Export**: Generate beautifully formatted candidate assessment reports directly in the browser via `jspdf` and `html2canvas`.
+  - Candidate audit history with soft-delete tracking, permanent purge, and one-click restoration.
+- 💾 **Dual-Layer Persistence**:
+  - MongoDB Atlas persistence for multi-device sync and team collaboration.
+  - Automatic fallback to browser LocalStorage when offline or running without a database connection.
 
 ---
 
@@ -33,8 +43,8 @@
 | :--- | :--- |
 | **Framework** | [TanStack Start](https://tanstack.com/start) with Nitro SSR |
 | **Routing & Client** | [TanStack Router](https://tanstack.com/router) & React 19 |
-| **Styling & UI** | Tailwind CSS, Radix UI primitives, Lucide Icons, Sonner |
-| **Database** | [MongoDB Atlas](https://www.mongodb.com/atlas) (Native Node Driver) |
+| **Styling & UI** | Tailwind CSS v4, Radix UI primitives, Lucide Icons, Sonner |
+| **Database** | [MongoDB Atlas](https://www.mongodb.com/atlas) (Native Node Driver) + LocalStorage fallback |
 | **Document Parsing** | `pdfjs-dist`, `mammoth`, `tesseract.js`, `fflate` |
 | **PDF Reporting** | `jspdf`, `html2canvas` |
 | **Supported AI Providers** | Groq Cloud, Cerebras Wafer-Scale, Qwen DashScope, Google Gemini, OpenRouter, NVIDIA NIM, Local Ollama |
@@ -45,12 +55,12 @@
 
 ### 1. Prerequisites
 - **Node.js**: `v20.x` or higher (or Bun)
-- **MongoDB Atlas Database**: Free M0 cluster connection URI
+- **MongoDB Atlas Database** (Optional but recommended): Free M0 cluster connection URI
 
 ### 2. Clone Repository & Install Dependencies
 ```bash
-git clone <repository-url>
-cd "BULK RESUME ANALYSER"
+git clone https://github.com/sowmiyan-s/Bulk-Resume-Analyzer.git
+cd "Bulk-Resume-Analyzer"
 npm install
 ```
 
@@ -62,13 +72,13 @@ cp .env.example .env
 
 Edit `.env` and fill in your values:
 ```ini
-# Required: MongoDB Atlas connection string
+# Optional: MongoDB Atlas connection string (falls back to local storage if omitted)
 MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/resume_radiance?retryWrites=true&w=majority
 
-# Required: Admin Panel passcode
+# Required: Admin Panel passcode (default: 123321)
 ADMIN_PASSWORD=123321
 
-# Optional: Server-side API key defaults (can also be saved via /admin UI)
+# Optional: Server-side API key defaults (can also be saved securely via /admin UI)
 GROQ_API_KEY=gsk_...
 CEREBRAS_API_KEY=csk_...
 QWEN_API_KEY=sk-...
@@ -91,7 +101,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Variable | Required | Description |
 | :--- | :---: | :--- |
-| `MONGODB_URI` | **Yes** | MongoDB Atlas connection string for persistent settings & candidate history. |
+| `MONGODB_URI` | No | MongoDB Atlas connection string for persistent settings & candidate history. |
 | `ADMIN_PASSWORD` | **Yes** | Passcode required to unlock the `/admin` portal (default: `123321`). |
 | `ENCRYPTION_SECRET` | No | 32-byte hex string used for AES-256 encryption of vault keys in MongoDB. |
 | `GROQ_API_KEY` | No | Groq Cloud API key ([console.groq.com](https://console.groq.com/keys)). |
